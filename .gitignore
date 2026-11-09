@@ -1,0 +1,8 @@
+
+## Files for claude
+photos/*
+dist/*
+backups/*
+originals/*
+reference/*
+scripts/__pycache__/*
