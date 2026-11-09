@@ -2,3 +2,5 @@
 ## Files for claude
 photos/*
 scripts/*
+dist/*
+backups/*
