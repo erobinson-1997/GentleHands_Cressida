@@ -1,0 +1,124 @@
+CRESSIDA MX83 - REAL-CAR MEASUREMENTS FOR AC TUNING
+====================================================
+Gather these over time and give them to Claude to tune the mod.
+Partial results are fine. Fill in the blanks as you go.
+
+Priority if short on time: #1, #2, #5 (cheap, quick, and they replace the
+values Claude is least sure about).
+
+
+1. DIFF BREAKAWAY TORQUE  (10 min, torque wrench)
+-------------------------------------------------
+  - Jack up BOTH rear wheels. Car in neutral, handbrake off.
+  - Spin one rear wheel by hand:
+      other wheel turns the SAME direction     -> LSD
+      other wheel turns the OPPOSITE direction -> open diff
+  - If LSD: put a torque wrench on one lug nut while the other wheel is held
+    still. Note the reading when the wheel starts to turn.
+  -> goes straight into PRELOAD in drivetrain.ini
+
+  Diff type (LSD/open): ________
+  Breakaway torque:     ________ ft-lb / Nm
+
+
+2. ACCELERATION PULL  (phone GPS app: Dragy, Harry's LapTimer, RaceChrono)
+--------------------------------------------------------------------------
+  - Full-throttle 3rd-gear pull from 30 to 70 mph on a flat road.
+  - Run it in BOTH directions and average them (cancels wind and slope).
+  - Also note the RPM at 60 mph in 5th, read off the tach
+    (checks gearing and tyre size).
+  -> Claude matches the same pull in AC and adjusts power.lut
+  -> A dyno sheet beats all of this, if you ever get one.
+
+  3rd gear 30-70 time, direction A: ________ s
+  3rd gear 30-70 time, direction B: ________ s
+  RPM at 60 mph in 5th:             ________
+
+
+3. COAST-DOWN TEST  (aero drag + rolling resistance)
+----------------------------------------------------
+  - Flat, empty road, no wind. Get to 70 mph, shift to neutral, time how
+    long it takes to coast down to 40 mph.
+  - Do it in BOTH directions.
+  -> tells Claude whether the top end feels strong because of the engine
+     or because the car's air resistance is set too low (aero.ini)
+
+  70->40 coast time, direction A: ________ s
+  70->40 coast time, direction B: ________ s
+
+
+4. SUSPENSION LEVERAGE  (jack + tape measure)
+---------------------------------------------
+  The rear wheel rate in the mod (35,000 N/m) is a GUESS. Measuring this
+  replaces the guess with a real number.
+  - Remove the spring, or loosen the coilover collar until it's slack.
+  - Jack under the hub/knuckle and measure the shock length (top mount to
+    bottom mount) at two hub heights about 25 mm apart.
+  - Leverage ratio = change in shock length / change in hub height.
+
+                      Hub height   Shock length
+  FRONT position 1:   ________     ________
+  FRONT position 2:   ________     ________
+  REAR  position 1:   ________     ________
+  REAR  position 2:   ________     ________
+
+
+5. ALIGNMENT SHEET
+------------------
+  - The printout from your last alignment: camber, caster and toe in
+    degrees for all four corners. A photo is fine.
+
+  Got it? (y/n): ____   Saved where: ______________________________
+
+
+6. WEIGHT
+---------
+  - BEST: corner weights (alignment shops, race shops, or track days often
+    have scales).
+  - ALTERNATIVE: a truck-stop CAT scale. Weigh the front axle and rear axle
+    separately, then the whole car.
+  - Note how much fuel was in the tank and whether you were in the car.
+
+  Corner weights   LF: ______  RF: ______  LR: ______  RR: ______
+  OR  Front axle: ______  Rear axle: ______  Total: ______
+  Fuel level: ______   Driver in car (y/n): ____
+
+
+7. STATIC MEASUREMENTS
+----------------------
+  - Ride height at all 4 corners: centre of the hub to the fender lip,
+    car on the ground.
+  - Sway bar diameters front and rear (calipers). Stock or aftermarket?
+  - BC damper settings: clicks counted from full stiff.
+  - Steering:
+      steering-wheel turns lock to lock
+      wheel angle at full lock (turn plates at an alignment shop), OR
+      turning circle curb-to-curb in a parking lot
+
+  Ride height   LF: ______  RF: ______  LR: ______  RR: ______
+  Sway bar      Front: ______ mm  Rear: ______ mm   Stock? ____
+  BC clicks from full stiff   Front: ______  Rear: ______
+  Lock-to-lock turns: ______
+  Wheel angle at full lock: ______  OR  Turning circle: ______
+
+
+8. TYRES
+--------
+  - Hot pressures: check right after 15 minutes of hard driving.
+    -> sets PRESSURE_IDEAL (the pressure each tyre works best at)
+  - The 351's UTQG rating off the sidewall (e.g. "TREADWEAR 200 A A")
+    and its exact size.
+  - OPTIONAL: lateral g on a steady circle in an empty lot, using a
+    g-meter app with the phone mounted flat. One run on the PHI, one on
+    the 351.
+    -> lets Claude set the grip difference from real numbers
+
+  Hot pressures, PHI    LF: ____  RF: ____  LR: ____  RR: ____
+  Hot pressures, 351    LF: ____  RF: ____  LR: ____  RR: ____
+  351 UTQG: ______________   Size: ______________
+  Steady-circle lateral g    PHI: ______   351: ______
+
+
+----------------------------------------------------
+REMINDER: after any data/ file change, delete or repack data.acd
+(Content Manager -> car -> Pack data) or AC ignores the edits.
