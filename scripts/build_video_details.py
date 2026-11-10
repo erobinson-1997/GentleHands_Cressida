@@ -413,6 +413,9 @@ def door_numbers(k):
 def drop_tris(n, mask):
     n.F = n.F[~mask]; update_bounds(n); return int(mask.sum())
 
+LAMP_X = (0.425, 0.585)           # the amber lamps under the bumper: inner / outer edge (m from the centre line)
+NOTCH_Y = 0.312                   # height of the bumper's lower edge in the cut-outs above them
+
 def bumper_path(k):
     """outline of the bumper rub strip seen from above, in polar form about (x 0, z 1.5):
     -> bin angles, radius per bin, (x, z) points from the right wheel arch round to the left, unit tangents, unit inward normals"""
@@ -455,22 +458,27 @@ def sweep(path, tg, inward, prof, uv, caps=False, both=False):
 
 # ------------------------------------------------------------------ 10b. the panel under the bumper that the valance used to bolt to, with its two amber lamps
 def lower_panel(k):
+    """what is left under the bumper with the valance gone: a black beam, the two amber lamps hanging in notches of the
+    bumper's lower edge, a narrow body-colour strip between them, and grey plastic flaps under the bumper corners"""
     ac, r, path, tg, inward = bumper_path(k)
-    n, _, M = k.find('BUMPER_LOWER'); uv = n.V[0, 6:8]
-    front = path[:, 1] > 1.0                                     # only across the nose; stops short of the wheel arches
-    P, T, I = path[front], tg[front], inward[front]
-    # body-colour strip, a little behind the bumper face, with a dark slot between it and the bumper
-    prof = [(0.110, 0.252), (0.046, 0.251), (0.041, 0.248), (0.039, 0.243), (0.039, 0.200), (0.043, 0.191), (0.055, 0.186), (0.100, 0.184), (0.140, 0.187)]
-    V, F = sweep(P, T, I, prof, uv, caps=True, both=True); k.add_mesh('BUMPER_PANEL', V, F, n.mat)
-    V, F = sweep(P, T, I, [(0.100, 0.292), (0.100, 0.270), (0.100, 0.248)], (0.5, 0.5), both=True); k.add_mesh('BUMPER_SLOT', V, F, k.mat_id('plastic_black1'))
+    n, _, M = k.find('BUMPER_LOWER'); uv = n.V[0, 6:8]; black = k.mat_id('plastic_black1')
+    x, z = path[:, 0], path[:, 1]; nose = (np.abs(x) < 0.60) & (z > 1.75)
+    def part(name, sel, prof, mat, uv_=(0.5, 0.5)):
+        V, F = sweep(path[sel], tg[sel], inward[sel], prof, uv_, caps=True, both=True); k.add_mesh(name, V, F, mat)
+    part('BUMPER_BEAM', (np.abs(x) < 0.72) & (z > 1.75), [(0.105, 0.305), (0.105, 0.250), (0.105, 0.195)], black)
+    part('BUMPER_PANEL', np.abs(x) < 0.50,
+         [(0.110, 0.246), (0.062, 0.245), (0.056, 0.241), (0.054, 0.236), (0.054, 0.212), (0.058, 0.205), (0.070, 0.201), (0.110, 0.200)], n.mat, uv)
     k.set_texture('gh_amber.png', flat_texture((214, 112, 26)))
-    mat = simple_material('gh_front_marker', 'gh_amber.png', 0.45, 0.55, 0.45, 60.0); mid = k.add_material(mat)
-    lamp = [(0.100, 0.285), (0.040, 0.284), (0.037, 0.280), (0.037, 0.256), (0.040, 0.252), (0.100, 0.251)]   # sits in the slot
+    mid = k.add_material(simple_material('gh_front_marker', 'gh_amber.png', 0.45, 0.55, 0.45, 60.0))
+    flap = [(0.034, 0.292), (0.022, 0.286), (0.024, 0.260), (0.034, 0.215), (0.046, 0.193), (0.062, 0.187), (0.100, 0.189)]
     for side in (-1, 1):
-        s = (P[:, 0] * side > 0.415) & (P[:, 0] * side < 0.575)
-        V, F = sweep(P[s], T[s], I[s], lamp, (0.5, 0.5), caps=True, both=True)
-        k.add_mesh('FRONT_MARKER_' + 'RL'[side > 0], V, F, mid)
-    return {'panel_verts': int(front.sum()) * len(prof)}
+        nm = 'RL'[side > 0]; xs = x * side
+        part('FRONT_MARKER_' + nm, nose & (xs > LAMP_X[0]) & (xs < LAMP_X[1]),
+             [(0.080, 0.304), (0.048, 0.303), (0.046, 0.300), (0.046, 0.266), (0.048, 0.263), (0.080, 0.262)], mid)
+        part('FRONT_MARKER_HOUSING_' + nm, nose & (xs > LAMP_X[0] - 0.012) & (xs < LAMP_X[1] + 0.012),
+             [(0.104, 0.310), (0.053, 0.309), (0.053, 0.257), (0.104, 0.256)], black)
+        part('BUMPER_FLAP_' + nm, (xs > 0) & ~nose, flap, k.mat_id('gh_mudflap'))
+    return {'stations': len(path)}
 
 def front_end(k):
     info = {}
@@ -484,11 +492,12 @@ def front_end(k):
     lw = n.V[:, 1] < 0.366; n.V[lw, 1] = 0.366                    # straight lower edge instead of a saw-tooth (mesh is in world space)
     # ...and is replaced by a plain lower face that follows the strip around the nose and tucks under at the bottom
     ac, r, path, tg, inward = bumper_path(k)
+    notch = (np.abs(np.abs(path[:, 0]) - np.mean(LAMP_X)) < np.ptp(LAMP_X) / 2 + 0.02) & (path[:, 1] > 1.75)   # cut-outs over the lamps
     prof = [(0.006, 0.370), (0.006, 0.348), (0.009, 0.326), (0.017, 0.307), (0.031, 0.294), (0.052, 0.287), (0.080, 0.285), (0.120, 0.288)]
     V = []; F = []; np_ = len(prof)
     for i, (p, q) in enumerate(zip(path, inward)):
         for j, (d, y) in enumerate(prof):
-            V.append([p[0] + q[0] * d, y, p[1] + q[1] * d, 0, 0, 0, uv[0], uv[1], tg[i, 0], 0, tg[i, 1]])
+            V.append([p[0] + q[0] * d, max(y, NOTCH_Y) if notch[i] else y, p[1] + q[1] * d, 0, 0, 0, uv[0], uv[1], tg[i, 0], 0, tg[i, 1]])
     for i in range(len(path) - 1):
         for j in range(np_ - 1):
             a = i * np_ + j; b_ = a + np_; F += [[a, b_, a + 1], [a + 1, b_, b_ + 1]]
