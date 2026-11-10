@@ -436,11 +436,11 @@ def bumper_path(k):
 def sweep(path, tg, inward, prof, uv, caps=False, both=False, shift=None, ytop=None):
     """sweep a (setback, height) profile along the outline; smooth normals pointing away from the car"""
     from kn5io import weld_normals
-    V = []; F = []; np_ = len(prof)
+    V = []; F = []; np_ = len(prof); y0 = min(y for _, y in prof); y1 = max(y for _, y in prof)
     for i, (p, q) in enumerate(zip(path, inward)):
         for d, y in prof:
             if shift is not None: d = d + shift[i]                # per-station extra setback
-            if ytop is not None: y = min(y, ytop[i])              # per-station ceiling
+            if ytop is not None and ytop[i] < y1: y = y0 + (y - y0) * (ytop[i] - y0) / (y1 - y0)   # per-station ceiling: squash, keep the bottom
             V.append([p[0] + q[0] * d, y, p[1] + q[1] * d, 0, 0, 0, uv[0], uv[1], tg[i, 0], 0, tg[i, 1]])
     for i in range(len(path) - 1):
         for j in range(np_ - 1):
@@ -470,21 +470,21 @@ def lower_panel(k):
         kw = {k_: v[sel] for k_, v in kw.items()}
         V, F = sweep(path[sel], tg[sel], inward[sel], prof, uv_, caps=True, both=True, **kw); k.add_mesh(name, V, F, mat)
     part('BUMPER_BEAM', (np.abs(x) < 0.72) & (z > 1.75), [(0.122, 0.305), (0.122, 0.250), (0.122, 0.195)], black)
-    part('BUMPER_PANEL', np.abs(x) < LAMP_X[0] - 0.02,
-         [(0.125, 0.246), (0.078, 0.245), (0.072, 0.241), (0.070, 0.236), (0.070, 0.212), (0.074, 0.205), (0.086, 0.201), (0.125, 0.200)], n.mat, uv)
     k.set_texture('gh_amber.png', flat_texture((214, 112, 26)))
     mid = k.add_material(simple_material('gh_front_marker', 'gh_amber.png', 0.45, 0.55, 0.45, 60.0))
-    # grey plastic panel each side: under the bumper from the wheel arch round the corner and on below the lamp.
-    # Nearly flush with the bumper along the side, set well back from its face across the front.
-    flap = [(0.040, 0.292), (0.024, 0.286), (0.026, 0.260), (0.038, 0.215), (0.052, 0.193), (0.068, 0.187), (0.110, 0.189)]
+    # the piece the valance bolted to is one part right round the nose: a body-colour lip along the bottom, and above it
+    # (outboard of the lamps only) a grey plastic face. Nearly flush with the bumper along the sides, set back across the front.
     back = 0.050 * ss(1.72, 1.95, z)
+    lip = [(0.075, 0.247), (0.036, 0.246), (0.031, 0.243), (0.038, 0.215), (0.052, 0.193), (0.068, 0.187), (0.110, 0.189)]
+    part('BUMPER_PANEL', np.ones(len(x), bool), lip, n.mat, uv, shift=back)
+    face = [(0.050, 0.292), (0.024, 0.287), (0.025, 0.265), (0.031, 0.243)]
     for side in (-1, 1):
         nm = 'RL'[side > 0]; xs = x * side
         lamp = nose & (xs > LAMP_X[0]) & (xs < LAMP_X[1]); pocket = nose & (xs > LAMP_X[0] - 0.012) & (xs < LAMP_X[1] + 0.012)
         part('FRONT_MARKER_' + nm, lamp, [(0.080, 0.304), (0.048, 0.303), (0.046, 0.300), (0.046, 0.266), (0.048, 0.263), (0.080, 0.262)], mid)
         part('FRONT_MARKER_HOUSING_' + nm, pocket, [(0.118, 0.310), (0.053, 0.309), (0.053, 0.257), (0.118, 0.256)], black)
-        part('BUMPER_FLAP_' + nm, (xs > LAMP_X[0] - 0.03) | ((xs > 0) & ~nose), flap, k.mat_id('gh_mudflap'),
-             shift=back, ytop=np.where(pocket, 0.252, 9.0))
+        part('BUMPER_FLAP_' + nm, (xs > LAMP_X[0] - 0.03) | ((xs > 0) & ~nose), face, k.mat_id('gh_mudflap'),
+             shift=back, ytop=np.where(pocket, 0.253, 9.0))
     return {'stations': len(path)}
 
 def front_end(k):
