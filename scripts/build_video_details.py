@@ -469,15 +469,17 @@ def lower_panel(k):
     def part(name, sel, prof, mat, uv_=(0.5, 0.5), **kw):
         kw = {k_: v[sel] for k_, v in kw.items()}
         V, F = sweep(path[sel], tg[sel], inward[sel], prof, uv_, caps=True, both=True, **kw); k.add_mesh(name, V, F, mat)
-    part('BUMPER_BEAM', (np.abs(x) < 0.72) & (z > 1.75), [(0.122, 0.305), (0.122, 0.250), (0.122, 0.195)], black)
+    part('BUMPER_BEAM', (np.abs(x) < 0.72) & (z > 1.75), [(0.140, 0.305), (0.140, 0.250), (0.140, 0.195)], black)
     k.set_texture('gh_amber.png', flat_texture((214, 112, 26)))
     mid = k.add_material(simple_material('gh_front_marker', 'gh_amber.png', 0.45, 0.55, 0.45, 60.0))
     # the piece the valance bolted to is one part right round the nose: a body-colour lip along the bottom, and above it
     # (outboard of the lamps only) a grey plastic face. Nearly flush with the bumper along the sides, set back across the front.
-    back = 0.050 * ss(1.72, 1.95, z)
-    lip = [(0.075, 0.247), (0.036, 0.246), (0.031, 0.243), (0.038, 0.215), (0.052, 0.193), (0.068, 0.187), (0.110, 0.189)]
+    # Seen from the side the face is an S: it starts just behind the bumper's lower edge, sweeps back, drops, and curls
+    # under; the lip on its own (centre of the car, where the face is cut away) is the lower half of that S, a C.
+    back = 0.040 * ss(1.72, 1.95, z)
+    lip = [(0.100, 0.247), (0.066, 0.246), (0.062, 0.243), (0.060, 0.225), (0.056, 0.208), (0.060, 0.196), (0.068, 0.189), (0.085, 0.186), (0.120, 0.188)]
     part('BUMPER_PANEL', np.ones(len(x), bool), lip, n.mat, uv, shift=back)
-    face = [(0.050, 0.292), (0.024, 0.287), (0.025, 0.265), (0.031, 0.243)]
+    face = [(0.050, 0.296), (0.022, 0.292), (0.030, 0.280), (0.050, 0.262), (0.060, 0.250), (0.062, 0.243)]
     for side in (-1, 1):
         nm = 'RL'[side > 0]; xs = x * side
         lamp = nose & (xs > LAMP_X[0]) & (xs < LAMP_X[1]); pocket = nose & (xs > LAMP_X[0] - 0.012) & (xs < LAMP_X[1] + 0.012)
