@@ -422,6 +422,10 @@ def bumper_path(k):
     r = np.array([rad[(ang >= a) & (ang <= b_)].max() if ((ang >= a) & (ang <= b_)).any() else np.nan for a, b_ in zip(edges[:-1], edges[1:])])
     ok = np.isfinite(r); r = np.interp(ac, ac[ok], r[ok]); r = gaussian_filter(r, 1.0, mode='nearest')
     path = np.c_[r * np.sin(ac), 1.5 + r * np.cos(ac)]
+    def run_back(p, q):                                           # carry each end straight on to just ahead of the tyre
+        d = (p - q) / np.linalg.norm(p - q); m = int(np.ceil(max(p[1] - 1.632, 0) / 0.012))
+        return [p + d * (p[1] - 1.632) / max(-d[1], 0.5) * (j + 1) / m for j in range(m)]
+    path = np.array(run_back(path[0], path[2])[::-1] + list(path) + run_back(path[-1], path[-3]))
     tg = np.gradient(path, axis=0); tg /= np.linalg.norm(tg, axis=1, keepdims=True)
     inward = np.c_[-tg[:, 1], tg[:, 0]]; inward *= np.sign((inward * (np.array([0, 1.5]) - path)).sum(1))[:, None]
     return ac, r, path, tg, inward
@@ -453,7 +457,7 @@ def sweep(path, tg, inward, prof, uv, caps=False, both=False):
 def lower_panel(k):
     ac, r, path, tg, inward = bumper_path(k)
     n, _, M = k.find('BUMPER_LOWER'); uv = n.V[0, 6:8]
-    front = path[:, 1] > 1.70                                     # only across the nose; stops short of the wheel arches
+    front = path[:, 1] > 1.0                                     # only across the nose; stops short of the wheel arches
     P, T, I = path[front], tg[front], inward[front]
     # body-colour strip, a little behind the bumper face, with a dark slot between it and the bumper
     prof = [(0.110, 0.252), (0.046, 0.251), (0.041, 0.248), (0.039, 0.243), (0.039, 0.200), (0.043, 0.191), (0.055, 0.186), (0.100, 0.184), (0.140, 0.187)]
