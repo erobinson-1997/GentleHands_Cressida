@@ -426,7 +426,7 @@ def bumper_path(k):
     inward = np.c_[-tg[:, 1], tg[:, 0]]; inward *= np.sign((inward * (np.array([0, 1.5]) - path)).sum(1))[:, None]
     return ac, r, path, tg, inward
 
-def sweep(path, tg, inward, prof, uv, caps=False):
+def sweep(path, tg, inward, prof, uv, caps=False, both=False):
     """sweep a (setback, height) profile along the outline; smooth normals pointing away from the car"""
     from kn5io import weld_normals
     V = []; F = []; np_ = len(prof)
@@ -444,24 +444,27 @@ def sweep(path, tg, inward, prof, uv, caps=False):
         for i, sgn in ((0, -1.0), (len(path) - 1, 1.0)):
             c = V[i * np_:(i + 1) * np_].copy(); c[:, 3:6] = [sgn * tg[i, 0], 0, sgn * tg[i, 1]]; o = len(V)
             V = np.vstack([V, c]); F = np.vstack([F, [[o, o + j, o + j + 1] for j in range(1, np_ - 1)]])
-    return V, fix_winding(V, F)
+    F = fix_winding(V, F)
+    if both:                                                      # visible from behind as well (no see-through backs)
+        B_ = V.copy(); B_[:, 3:6] *= -1; F = np.vstack([F, F[:, [0, 2, 1]] + len(V)]); V = np.vstack([V, B_])
+    return V, F
 
 # ------------------------------------------------------------------ 10b. the panel under the bumper that the valance used to bolt to, with its two amber lamps
 def lower_panel(k):
     ac, r, path, tg, inward = bumper_path(k)
     n, _, M = k.find('BUMPER_LOWER'); uv = n.V[0, 6:8]
-    front = path[:, 1] > 1.80                                     # only across the nose; stops short of the wheel arches
+    front = path[:, 1] > 1.70                                     # only across the nose; stops short of the wheel arches
     P, T, I = path[front], tg[front], inward[front]
     # body-colour strip, a little behind the bumper face, with a dark slot between it and the bumper
-    prof = [(0.110, 0.252), (0.050, 0.251), (0.043, 0.247), (0.040, 0.240), (0.040, 0.222), (0.046, 0.211), (0.062, 0.205), (0.100, 0.203), (0.140, 0.206)]
-    V, F = sweep(P, T, I, prof, uv); k.add_mesh('BUMPER_PANEL', V, F, n.mat)
-    V, F = sweep(P, T, I, [(0.100, 0.292), (0.100, 0.270), (0.100, 0.248)], (0.5, 0.5)); k.add_mesh('BUMPER_SLOT', V, F, k.mat_id('plastic_black1'))
+    prof = [(0.110, 0.252), (0.046, 0.251), (0.041, 0.248), (0.039, 0.243), (0.039, 0.200), (0.043, 0.191), (0.055, 0.186), (0.100, 0.184), (0.140, 0.187)]
+    V, F = sweep(P, T, I, prof, uv, caps=True, both=True); k.add_mesh('BUMPER_PANEL', V, F, n.mat)
+    V, F = sweep(P, T, I, [(0.100, 0.292), (0.100, 0.270), (0.100, 0.248)], (0.5, 0.5), both=True); k.add_mesh('BUMPER_SLOT', V, F, k.mat_id('plastic_black1'))
     k.set_texture('gh_amber.png', flat_texture((214, 112, 26)))
     mat = simple_material('gh_front_marker', 'gh_amber.png', 0.45, 0.55, 0.45, 60.0); mid = k.add_material(mat)
     lamp = [(0.100, 0.285), (0.040, 0.284), (0.037, 0.280), (0.037, 0.256), (0.040, 0.252), (0.100, 0.251)]   # sits in the slot
     for side in (-1, 1):
         s = (P[:, 0] * side > 0.415) & (P[:, 0] * side < 0.575)
-        V, F = sweep(P[s], T[s], I[s], lamp, (0.5, 0.5), caps=True)
+        V, F = sweep(P[s], T[s], I[s], lamp, (0.5, 0.5), caps=True, both=True)
         k.add_mesh('FRONT_MARKER_' + 'RL'[side > 0], V, F, mid)
     return {'panel_verts': int(front.sum()) * len(prof)}
 
@@ -585,11 +588,15 @@ def clear_lamps(k):
     a[..., :3] = np.where(reg[..., None], clear, a[..., :3])
     a[..., 3] = np.where(reg, 96, a[..., 3])
     # the corner lamps are clear too, with a small amber reflector toward the rear of the side face
-    from scipy.interpolate import LinearNDInterpolator
-    n, _, M = k.find('Object035'); w = world_pos(n, M); s = w[:, 2] > 1.5
-    uv = np.c_[np.mod(n.V[s, 6], 1), np.mod(n.V[s, 7], 1)]; _, i = np.unique(np.round(uv * 8192), axis=0, return_index=True)
-    f = LinearNDInterpolator(uv[i], w[s][i][:, 1:3]); zr = w[s][:, 2].min()
-    py, px = np.where(corner); yz = f(np.c_[(px + 0.5) / S, (py + 0.5) / S])
+    import cv2
+    n, _, M = k.find('Object035'); w = world_pos(n, M); F = n.F[(w[n.F][:, :, 2] > 1.5).all(1)]; zr = w[F][:, :, 2].min()
+    uv = np.mod(n.V[:, 6:8].astype(np.float64), 1)[F] * S                     # (t,3,2) texel coordinates of every lens triangle
+    tid = np.zeros((S, S), np.int32)
+    for i, p in enumerate(np.round(uv * 16).astype(np.int32)): cv2.fillConvexPoly(tid, p, i + 1, shift=4)
+    A = np.concatenate([uv, np.ones((len(F), 3, 1))], 2); ok = np.abs(np.linalg.det(A)) > 1e-9
+    co = np.zeros((len(F) + 1, 3, 2)); co[1:][ok] = np.linalg.solve(A[ok], w[F][ok][:, :, 1:3])   # texel -> (y, z), exact per triangle
+    py, px = np.where(corner & (tid > 0)); c = co[tid[py, px]]
+    yz = c[:, 0] * (px + 0.5)[:, None] + c[:, 1] * (py + 0.5)[:, None] + c[:, 2]
     amber = (yz[:, 0] > 0.500) & (yz[:, 0] < 0.562) & (yz[:, 1] > zr + 0.022) & (yz[:, 1] < zr + 0.066)
     a[py[amber], px[amber], :3] = np.array([236, 104, 14.0]) + 0.5 * lines[py[amber], px[amber]]
     a[py[amber], px[amber], 3] = 235
