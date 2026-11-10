@@ -452,13 +452,15 @@ def lower_panel(k):
     n, _, M = k.find('BUMPER_LOWER'); uv = n.V[0, 6:8]
     front = path[:, 1] > 1.80                                     # only across the nose; stops short of the wheel arches
     P, T, I = path[front], tg[front], inward[front]
-    prof = [(0.125, 0.287), (0.060, 0.284), (0.050, 0.279), (0.047, 0.270), (0.047, 0.228), (0.052, 0.216), (0.068, 0.209), (0.100, 0.207), (0.140, 0.210)]
+    # body-colour strip, a little behind the bumper face, with a dark slot between it and the bumper
+    prof = [(0.110, 0.252), (0.050, 0.251), (0.043, 0.247), (0.040, 0.240), (0.040, 0.222), (0.046, 0.211), (0.062, 0.205), (0.100, 0.203), (0.140, 0.206)]
     V, F = sweep(P, T, I, prof, uv); k.add_mesh('BUMPER_PANEL', V, F, n.mat)
+    V, F = sweep(P, T, I, [(0.100, 0.292), (0.100, 0.270), (0.100, 0.248)], (0.5, 0.5)); k.add_mesh('BUMPER_SLOT', V, F, k.mat_id('plastic_black1'))
     k.set_texture('gh_amber.png', flat_texture((214, 112, 26)))
     mat = simple_material('gh_front_marker', 'gh_amber.png', 0.45, 0.55, 0.45, 60.0); mid = k.add_material(mat)
-    lamp = [(0.050, 0.283), (0.030, 0.281), (0.027, 0.277), (0.027, 0.245), (0.030, 0.241), (0.050, 0.239)]
+    lamp = [(0.100, 0.285), (0.040, 0.284), (0.037, 0.280), (0.037, 0.256), (0.040, 0.252), (0.100, 0.251)]   # sits in the slot
     for side in (-1, 1):
-        s = (P[:, 0] * side > 0.40) & (P[:, 0] * side < 0.585)
+        s = (P[:, 0] * side > 0.415) & (P[:, 0] * side < 0.575)
         V, F = sweep(P[s], T[s], I[s], lamp, (0.5, 0.5), caps=True)
         k.add_mesh('FRONT_MARKER_' + 'RL'[side > 0], V, F, mid)
     return {'panel_verts': int(front.sum()) * len(prof)}
@@ -525,7 +527,9 @@ def badge_image(w=512, h=256):
     d.polygon([(cx - 34, cy - 22), (cx - 18, cy - 22), (cx - 18, cy + 22), (cx, cy + 58), (cx + 18, cy + 22), (cx + 18, cy - 22), (cx + 34, cy - 22), (cx + 34, cy + 28), (cx, cy + 74), (cx - 34, cy + 28)], fill=silver)
     f = font(['arialbd.ttf'], 150)
     g = Image.new('L', (1400, 300), 0); ImageDraw.Draw(g).text((10, 10), 'T O Y O T A', font=f, fill=255)
-    g = g.crop(g.getbbox()).resize((330, 70), Image.LANCZOS)
+    g = g.crop(g.getbbox()).resize((306, 62), Image.LANCZOS)
+    d.rounded_rectangle((160, 76, 506, 180), 10, fill=(20, 21, 24, 255), outline=silver, width=5)   # black plaque, bright rim
+    im.alpha_composite(Image.new('RGBA', (1, 1), (0, 0, 0, 0)), (0, 0))
     sh = Image.new('RGBA', g.size, edge); sh.putalpha(g.filter(ImageFilter.MaxFilter(5))); im.alpha_composite(sh, (170, 93))
     tx = Image.new('RGBA', g.size, silver); tx.putalpha(g); im.alpha_composite(tx, (170, 93))
     return im
@@ -536,17 +540,20 @@ def grille(k):
     size = np.array([w[lab == c].max(0) - w[lab == c].min(0) for c in range(nc)])
     vert = np.where((size[:, 0] < 0.01) & (size[:, 1] > 0.10))[0]; horiz = np.where((size[:, 1] < 0.02) & (size[:, 0] > 0.6))[0]
     assert len(vert) == 19 and len(horiz) == 3, (len(vert), len(horiz))
-    # extra bright bars between / below the three the mesh has (copies of them, following the lean of the grille)
+    # egg-crate: twice as many bars each way (copies of the ones the mesh has, following the lean of the grille), all black
     order = horiz[np.argsort([w[lab == c][:, 1].min() for c in horiz])]
-    addV = []; addF = []; off = len(n.V)
-    for c, (dy, dz) in ((order[0], (-0.015, 0.001)), (order[0], (0.015, -0.001)), (order[1], (0.015, -0.005)), (order[2], (0.015, -0.007))):
+    vorder = vert[np.argsort([w[lab == c][:, 0].mean() for c in vert])]; vc = np.array([w[lab == c].mean(0) for c in vorder])
+    copies = [(order[0], (0, -0.015, 0.001)), (order[0], (0, 0.015, -0.001)), (order[1], (0, 0.015, -0.005)), (order[2], (0, 0.015, -0.007)), (order[2], (0, 0.030, -0.015))]
+    copies += [(c, (d[0] / 2, 0, d[2] / 2)) for c, d in zip(vorder[:-1], np.diff(vc, axis=0))]
+    addV = []; addF = []; off = len(n.V); Mi = np.linalg.inv(M[:3, :3])
+    for c, d in copies:
         vi = np.where(lab == c)[0]; remap = -np.ones(len(n.V), np.int64); remap[vi] = np.arange(len(vi)) + off
-        V = n.V[vi].copy(); V[:, 1] += dy; V[:, 2] += dz                       # mesh is in world space
+        V = n.V[vi].copy(); V[:, :3] += np.array(d) @ Mi                       # world-space offset (the mesh is in cm, rotated)
         tri = n.F[np.isin(n.F[:, 0], vi)]; addV.append(V); addF.append(remap[tri]); off += len(vi)
-    is_vert = np.isin(lab, vert)
+    is_bar = np.isin(lab, np.r_[vert, horiz])
     n.V = np.vstack([n.V] + addV); n.F = np.vstack([n.F] + addF)
-    is_vert = np.r_[is_vert, np.zeros(len(n.V) - len(is_vert), bool)]
-    V, F = split_mesh(n, is_vert[n.F].all(1))                                 # the uprights become black plastic
+    is_bar = np.r_[is_bar, np.ones(len(n.V) - len(is_bar), bool)]
+    V, F = split_mesh(n, is_bar[n.F].all(1))                                  # only the surround stays bright
     m = Node(2, 'grille_uprights'); m.V = V; m.F = F; m.mat = k.mat_id('plastic_black1'); update_bounds(m); parent.children.append(m)
     info['uprights'] = len(V); info['bars_added'] = len(addV)
     # modern oval off, crest + lettering on
@@ -555,14 +562,14 @@ def grille(k):
     k.set_texture('gh_grille_badges.png', png_bytes(badge_image()))
     mat = simple_material('gh_grille_badges', 'gh_grille_badges.png', 0.50, 0.50, 0.60, 40.0, shader='ksPerPixelAT', alpha_ref=0.5); mat.alpha_tested = 1
     mid = k.add_material(mat)
-    n, _, M = k.find('radiator_grill'); w = world_pos(n, M)
+    w = np.vstack([world_pos(n, M), world_pos(m, M)])                          # surround + bars
     def front(x, y0, y1):
         s = w[(np.abs(w[:, 0] - x) < 0.03) & (w[:, 1] > y0) & (w[:, 1] < y1)]; return s[:, 2].max() + 0.004
     b = Builder()
     z = front(0.0, 0.49, 0.58)
     b.poly([(-0.030, 0.492, z), (0.030, 0.492, z), (0.030, 0.574, z - 0.004), (-0.030, 0.574, z - 0.004)], (0, 0, 1), [(0, 1), (0.3125, 1), (0.3125, 0), (0, 0)])
-    xa, xb = 0.160, 0.300; za, zb = front(xa, 0.46, 0.50), front(xb, 0.46, 0.50)
-    b.poly([(xa, 0.4735, za), (xb, 0.4735, zb), (xb, 0.4935, zb), (xa, 0.4935, za)], (0, 0, 1), [(0.33, 0.66), (0.98, 0.66), (0.98, 0.34), (0.33, 0.34)])
+    xa, xb = 0.155, 0.305; za, zb = front(xa, 0.46, 0.50), front(xb, 0.46, 0.50)
+    b.poly([(xa, 0.470, za), (xb, 0.470, zb), (xb, 0.497, zb), (xa, 0.497, za)], (0, 0, 1), [(0.305, 0.715), (0.995, 0.715), (0.995, 0.285), (0.305, 0.285)])
     V, F = b.done(); k.add_mesh('GRILLE_BADGES', V, F, mid, shadows=0)
     return info
 
@@ -574,9 +581,18 @@ def clear_lamps(k):
     yy, xx = np.mgrid[0:S, 0:S] / S
     head = (xx > 0.685) & (yy > 0.245); corner = (xx < 0.343) & (yy > 0.598); reg = head | corner   # lens islands of the atlas
     lines = np.clip((a[..., :3].mean(2) - 24) * 3.0, 0, 60)[..., None]        # keep the moulded fluting, just lighter
-    clear = np.where(corner[..., None], np.array([226, 138, 36.0]), np.array([196, 200, 198.0])) + lines   # corner lamps are amber
+    clear = np.array([196, 200, 198.0]) + lines
     a[..., :3] = np.where(reg[..., None], clear, a[..., :3])
-    a[..., 3] = np.where(corner, 150, np.where(head, 78, a[..., 3]))
+    a[..., 3] = np.where(reg, 96, a[..., 3])
+    # the corner lamps are clear too, with a small amber reflector toward the rear of the side face
+    from scipy.interpolate import LinearNDInterpolator
+    n, _, M = k.find('Object035'); w = world_pos(n, M); s = w[:, 2] > 1.5
+    uv = np.c_[np.mod(n.V[s, 6], 1), np.mod(n.V[s, 7], 1)]; _, i = np.unique(np.round(uv * 8192), axis=0, return_index=True)
+    f = LinearNDInterpolator(uv[i], w[s][i][:, 1:3]); zr = w[s][:, 2].min()
+    py, px = np.where(corner); yz = f(np.c_[(px + 0.5) / S, (py + 0.5) / S])
+    amber = (yz[:, 0] > 0.500) & (yz[:, 0] < 0.562) & (yz[:, 1] > zr + 0.022) & (yz[:, 1] < zr + 0.066)
+    a[py[amber], px[amber], :3] = np.array([236, 104, 14.0]) + 0.5 * lines[py[amber], px[amber]]
+    a[py[amber], px[amber], 3] = 235
     b = io.BytesIO(); Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), 'RGBA').save(b, format='DDS', pixel_format='DXT5')
     new = bytes(t[2][:128]) + b.getvalue()[128:]
     assert len(new) == len(t[2]); t[2] = new
