@@ -36,3 +36,19 @@ The build is deterministic: the same inputs give a byte-identical file (MD5 e02e
 ## Credit (CC BY 4.0)
 "Advan AVS 5" (https://skfb.ly/oE7Rn) by gunis.david, licensed CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/).
 Changes: converted to KN5, scaled and re-proportioned to the car, re-oriented, re-shaded and re-textured; lug nuts, centre cap and spacers added.
+
+## Stage 2: details from the walk-around videos
+
+    python scripts/build_video_details.py
+
+Takes the stage-1 model (the output of `build_rear_damage.py`, MD5 e02e7a7c...) from `originals/stage1_rear_damage.kn5`
+and writes `dist/ggh_toyota_cressida_mx83_stage_1.kn5`. The stage-1 file is the kn5 committed at cc7ebdd, so it can be
+restored with `git show cc7ebdd:gentlehands_toyota_cressida_mx83/ggh_toyota_cressida_mx83_stage_1.kn5 > originals/stage1_rear_damage.kn5`
+(run that from Git Bash or cmd, not PowerShell, which corrupts binary redirects). No FBX is needed for this stage.
+
+Steps (switch on/off in `STEPS` at the top of the script): satin-black wheels, four mud flaps, bare/rusty bash bar,
+California plate (`PLATE_TEXT`) and no front plate (`FRONT_PLATE`), the crease ahead of the fuel door, the unpainted
+driver-side mirror, the TIRE STREETS sticker on the left rear door glass.
+
+- kn5io.py     full kn5 load/edit/save (round trip is byte-identical); mesh split, subdivide-safe deform helpers
+- preview.py   software render of a kn5 for a quick look without the game: `python scripts/preview.py <kn5> <out_dir> [view ...]`
