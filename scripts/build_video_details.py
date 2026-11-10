@@ -453,7 +453,8 @@ def sweep(path, tg, inward, prof, uv, caps=False, both=False):
             V = np.vstack([V, c]); F = np.vstack([F, [[o, o + j, o + j + 1] for j in range(1, np_ - 1)]])
     F = fix_winding(V, F)
     if both:                                                      # visible from behind as well (no see-through backs)
-        B_ = V.copy(); B_[:, 3:6] *= -1; F = np.vstack([F, F[:, [0, 2, 1]] + len(V)]); V = np.vstack([V, B_])
+        B_ = V.copy(); B_[:, :3] -= 0.0015 * B_[:, 3:6]; B_[:, 3:6] *= -1;   # 1.5 mm inside, so the two skins never z-fight
+        F = np.vstack([F, F[:, [0, 2, 1]] + len(V)]); V = np.vstack([V, B_])
     return V, F
 
 # ------------------------------------------------------------------ 10b. the panel under the bumper that the valance used to bolt to, with its two amber lamps
@@ -616,6 +617,11 @@ def clear_lamps(k):
     b = io.BytesIO(); Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), 'RGBA').save(b, format='DDS', pixel_format='DXT5')
     new = bytes(t[2][:128]) + b.getvalue()[128:]
     assert len(new) == len(t[2]); t[2] = new
+    # satin reflectors: mirror-chrome facets showed up as hard bright blocks behind the clear lens
+    m = k.materials[k.mat_id('chrome')].copy('gh_lamp_reflector')
+    for p, v in (('ksAmbient', 0.25), ('ksDiffuse', 0.30), ('ksSpecular', 1.2), ('ksSpecularEXP', 60.0), ('fresnelC', 0.10), ('fresnelMaxLevel', 0.30)): m.set(p, v)
+    mid = k.add_material(m)
+    for name in ('headlight1', 'headlights_part006'): k.find(name)[0].mat = mid
     return {'texels': int(reg.sum())}
 
 def build(src, out):
