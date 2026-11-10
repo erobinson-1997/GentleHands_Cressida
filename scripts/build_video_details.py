@@ -14,10 +14,11 @@ from scipy.ndimage import gaussian_filter
 import config
 from kn5io import Kn5, Material, Node, world_pos, deform, split_mesh, update_bounds, unit
 
-STEPS = ['wheels_black', 'mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade']
+STEPS = ['wheels_black', 'mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade', 'door_numbers', 'front_end']
 PLATE_TEXT = '8XKQ407'          # made-up number (not the real plate); set to None to keep the original mod's plate
 PLATE_MOSAIC = True             # pixelate the number like a censored photo
-FRONT_PLATE = False             # the real car runs no front plate
+FRONT_PLATE = True              # hangs below the front bumper
+RACE_NUMBER = '888'             # door number panels; None for no panels
 FONTS = r'C:\Windows\Fonts'
 
 
@@ -270,23 +271,38 @@ def mirror_primer(k):
     return len(n.V)
 
 # ------------------------------------------------------------------ 7. "TIRE STREETS" sticker, left rear door glass
-def sticker_image(w=1024, h=440):
-    def word(text, size, fill, stroke, sw, box):
-        f = font(['impact.ttf', 'arialbd.ttf'], size)
-        im = Image.new('RGBA', (size * len(text), size * 2), (0, 0, 0, 0))
-        ImageDraw.Draw(im).text((sw + 4, sw + 4), text, font=f, fill=fill, stroke_width=sw, stroke_fill=stroke)
-        return im.crop(im.getbbox()).resize(box, Image.LANCZOS)
-    im = Image.new('RGBA', (w, h), (0, 0, 0, 0)); lean = 0.20; pad = int(lean * h / 2) + 4
-    a = word('TIRE', 260, (120, 232, 46, 255), (16, 22, 16, 255), 12, (w - 2 * pad - 60, int(h * 0.54)))
-    b = word('STREETS', 200, (232, 232, 236, 255), (40, 40, 46, 255), 9, (w - 2 * pad - 60, int(h * 0.38)))
-    im.alpha_composite(a, (pad + 60, 6)); im.alpha_composite(b, (pad, h - b.size[1] - 6))
-    return im.transform((w, h), Image.AFFINE, (1, lean, -lean * h / 2, 0, 1, 0), Image.BICUBIC)   # lean it like the logo
+def sticker_image(w=1024, h=512):
+    """green slanted block with TIRE knocked out in black, hand-brushed white STREETS underneath (see Reference Photos)"""
+    def word(text, fonts, size, fill, box, stroke=0, stroke_fill=None, lean=0.0):
+        f = font(fonts, size)
+        im = Image.new('RGBA', (size * (len(text) + 2), size * 3), (0, 0, 0, 0))
+        ImageDraw.Draw(im).text((size, size), text, font=f, fill=fill, stroke_width=stroke, stroke_fill=stroke_fill)
+        im = im.crop(im.getbbox()).resize(box, Image.LANCZOS)
+        if lean:
+            pad = int(lean * box[1]) + 2; c = Image.new('RGBA', (box[0] + pad, box[1]), (0, 0, 0, 0)); c.alpha_composite(im, (0, 0))
+            im = c.transform(c.size, Image.AFFINE, (1, lean, -pad, 0, 1, 0), Image.BICUBIC)
+        return im
+    im = Image.new('RGBA', (w, h), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
+    top, bot, lean = 16, int(h * 0.56), 0.42
+    x0, x1 = 60, w - 16
+    d.polygon([(x0 + lean * (bot - top), top), (x1, top), (x1 - lean * (bot - top), bot), (x0, bot)], fill=(112, 222, 44, 255))
+    tire = word('TIRE', ['impact.ttf', 'arialbd.ttf'], 300, (18, 22, 18, 255), (int(w * 0.50), int((bot - top) * 0.62)), lean=lean)
+    im.alpha_composite(tire, ((w - tire.size[0]) // 2 + 20, top + int((bot - top) * 0.19)))
+    # worn print: scratch some of the black back to green
+    a = np.asarray(im).copy(); scr = noise((h, w), (0.7, 14), 31) > 0.80
+    blk = (a[..., :3].sum(2) < 120) & (a[..., 3] > 0) & scr; a[blk, :3] = (112, 222, 44); im = Image.fromarray(a, 'RGBA')
+    st = word('STREETS', ['segoeprb.ttf', 'Inkfree.ttf', 'comicz.ttf', 'impact.ttf'], 240, (236, 236, 240, 255),
+              (int(w * 0.74), int(h * 0.40)), stroke=5, stroke_fill=(236, 236, 240, 255), lean=0.30)
+    sh = Image.new('RGBA', st.size, (30, 32, 36, 255)); sh.putalpha(st.getchannel('A').filter(ImageFilter.MaxFilter(9)))
+    y = int(h * 0.50)
+    im.alpha_composite(sh, (8, y)); im.alpha_composite(st, (8, y))
+    return im
 def window_sticker(k):
     k.set_texture('gh_sticker.png', png_bytes(sticker_image()))
     m = simple_material('gh_sticker', 'gh_sticker.png', 0.45, 0.45, 0.05, 10.0, shader='ksPerPixelAT', alpha_ref=0.5)
     m.alpha_tested = 1; mid = k.add_material(m)
     n, _, M = k.find('window_ext'); w = world_pos(n, M)
-    z0, z1, y0, y1 = -0.40, -0.90, 0.950, 1.165                    # front edge, rear edge, bottom, top
+    z0, z1, y0, y1 = -0.475, -0.915, 0.950, 1.170                  # front edge, rear edge, bottom, top (clear of the door frame)
     g = w[(w[:, 0] > 0.5) & (w[:, 2] < z0 + 0.05) & (w[:, 2] > z1 - 0.05) & (w[:, 1] > y0 - 0.05) & (w[:, 1] < y1 + 0.05)]
     A = np.c_[np.ones(len(g)), g[:, 1], g[:, 2]]; coef = np.linalg.lstsq(A, g[:, 0], rcond=None)[0]   # glass plane x(y,z)
     nrm = np.array([1.0, -coef[1], -coef[2]]); nrm /= np.linalg.norm(nrm)
@@ -334,12 +350,12 @@ def hood_fade(k):
     X = xz[0].reshape(U.shape); Z = xz[1].reshape(U.shape)                                         # world position of every hood texel
     cloud = noise(U.shape, 38, 21); mott = noise(U.shape, 9, 22); fine = noise(U.shape, 1.0, 23)
     centre = np.exp(-(X / 0.62) ** 2) * ss(0.78, 1.00, Z) * (1 - ss(1.90, 2.04, Z))                # strongest down the middle, clean at the edges
-    m = np.clip((0.62 * cloud + 0.38 * mott - 0.36) / 0.22, 0, 1) * (0.35 + 0.65 * centre)
-    dark = 0.45 * np.exp(-((X + 0.05) / 0.22) ** 2 - ((Z - 1.62) / 0.20) ** 2)                       # the darker blotch near the front centre
-    chalk = np.array([118, 124, 134.0])
+    m = np.clip((0.90 * cloud + 0.10 * mott - 0.30) / 0.45, 0, 1) * centre          # soft, low-contrast haze
+    dark = 0.0 * np.exp(-((X + 0.05) / 0.22) ** 2 - ((Z - 1.62) / 0.20) ** 2)                       # the darker blotch near the front centre
+    chalk = np.array([150, 156, 166.0])
     reg = a[py0:py1, px0:px1, :3]
-    out = reg * (1 - 0.55 * m[..., None]) + chalk * 0.55 * m[..., None]
-    out *= (1 - 0.28 * dark[..., None]) * (0.97 + 0.06 * fine[..., None])
+    out = reg * (1 - 0.16 * m[..., None]) + chalk * 0.16 * m[..., None]
+    out *= (1 - 0.28 * dark[..., None]) * (0.99 + 0.02 * fine[..., None])
     a[py0:py1, px0:px1, :3] = np.where(reg.sum(2, keepdims=True) > 30, out, reg)                    # leave the black gutter between islands alone
     rgb = Image.fromarray(np.clip(a[..., :3], 0, 255).astype(np.uint8), 'RGB')
     dds = dxt5_with_mips(rgb, Image.fromarray(a[..., 3].astype(np.uint8)), t[2][:128])
@@ -347,6 +363,104 @@ def hood_fade(k):
     skin = config.PROJECT / 'gentlehands_toyota_cressida_mx83' / 'skins' / 'silver_176' / 'carpaint_diffuse.dds'
     if skin.exists(): skin.write_bytes(dds)                       # the skin's copy overrides the one inside the kn5
     return {'texels': [px0, py0, px1, py1], 'coverage': round(float((m > 0.3).mean()), 2), 'skin': skin.exists()}
+
+# ------------------------------------------------------------------ 9. race number panels on the front doors
+def number_panel_image(number, w=512, h=500, ss=2):
+    W, H = w * ss, h * ss
+    im = Image.new('RGB', (W, H), (238, 238, 234)); d = ImageDraw.Draw(im)
+    d.rectangle([0, 0, W - 1, H - 1], outline=(20, 20, 22), width=6 * ss)
+    d.rectangle([14 * ss, 14 * ss, W - 14 * ss, 150 * ss], fill=(22, 22, 24))
+    f = font(['arialbi.ttf', 'arialbd.ttf'], 100 * ss)
+    d.text((W / 2, 82 * ss), 'ONGRID', font=f, fill=(238, 238, 234), anchor='mm', stroke_width=2 * ss, stroke_fill=(238, 238, 234))
+    f = font(['arialbd.ttf', 'impact.ttf'], 330 * ss)
+    g = Image.new('L', (W * 3, H), 0); ImageDraw.Draw(g).text((20, 0), number, font=f, fill=255)
+    g = g.crop(g.getbbox()).resize((int(W * 0.78), int(H * 0.40)), Image.LANCZOS)
+    im.paste(Image.new('RGB', g.size, (20, 20, 22)), ((W - g.size[0]) // 2, int(H * 0.39)), g)
+    d.rectangle([60 * ss, int(H * 0.90), W - 60 * ss, int(H * 0.90) + 5 * ss], fill=(20, 20, 22))
+    f = font(['arialbd.ttf'], 22 * ss); d.text((W / 2, H * 0.945), 'TRACK DAYS', font=f, fill=(20, 20, 22), anchor='mm')
+    im = im.resize((w, h), Image.LANCZOS)
+    dirt = noise((h, w), 10, 41)[..., None]
+    return Image.fromarray(np.clip(np.asarray(im).astype(float) * (0.90 + 0.10 * dirt), 0, 255).astype(np.uint8), 'RGB')
+
+def door_numbers(k):
+    if not RACE_NUMBER: return None
+    from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
+    k.set_texture('gh_number_panel.png', png_bytes(number_panel_image(RACE_NUMBER)))
+    mid = k.add_material(simple_material('gh_number_panel', 'gh_number_panel.png', 0.42, 0.50, 0.12, 20.0))
+    zc, half_w, y0, y1 = 0.185, 0.160, 0.468, 0.770               # magnet panel between the side moulding and the belt line
+    b = Builder(); nu, nv = 16, 16; info = {}
+    for name, sx in (('lf_door', 1), ('rf_door', -1)):
+        n, _, M = k.find(name); w = world_pos(n, M)
+        skin = (n.V[:, 3] * sx > 0.5)                             # outward-facing door skin only
+        lin = LinearNDInterpolator(w[skin][:, [2, 1]], w[skin][:, 0] * sx); near = NearestNDInterpolator(w[skin][:, [2, 1]], w[skin][:, 0] * sx)
+        def surf(z, y):
+            v = float(lin(z, y)); return v if np.isfinite(v) else float(near(z, y))
+        def P(u, v):
+            z = zc - sx * half_w * (2 * u - 1); y = y1 + (y0 - y1) * v     # u runs left->right as read from outside
+            return np.array([sx * (surf(z, y) + 0.006), y, z])
+        for i in range(nu):
+            for j in range(nv):
+                c = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)]
+                pts = [P(a / nu, c_ / nv) for a, c_ in c]
+                nrm = np.cross(pts[1] - pts[0], pts[3] - pts[0]); nrm *= np.sign(nrm[0] * sx)
+                b.poly(pts, nrm, [(a / nu, c_ / nv) for a, c_ in c])
+        info[name] = (int(skin.sum()), [round(float(v), 3) for v in (w[skin][:, 1].min(), w[skin][:, 1].max(), w[skin][:, 2].min(), w[skin][:, 2].max())])
+    V, F = b.done(); assert np.isfinite(V).all(), 'panel left the door surface'
+    k.add_mesh('DOOR_NUMBERS', V, F, mid, shadows=0)
+    return info
+
+# ------------------------------------------------------------------ 10. front end: US bumper with the lower valance taken off
+def drop_tris(n, mask):
+    n.F = n.F[~mask]; update_bounds(n); return int(mask.sum())
+
+def front_end(k):
+    info = {}
+    # the aero lip under the bumper goes (the side skirts and the pieces behind the front wheels stay)
+    n, _, M = k.find('body_016'); c = world_pos(n, M)[n.F].mean(1); info['lip_tris'] = drop_tris(n, c[:, 2] > 1.55)
+    # everything on the bumper below the rub strip (slotted lower face) goes too...
+    n, _, M = k.find('f_bumper'); w = world_pos(n, M); c = w[n.F].mean(1)
+    up = np.where((np.abs(w[:, 0] - 0.30) < 0.05) & (np.abs(w[:, 1] - 0.44) < 0.02) & (w[:, 2] > 2.0))[0]
+    uv = n.V[up[0], 6:8].copy()                                   # a plain, evenly lit paint texel
+    info['bumper_tris'] = drop_tris(n, (w[n.F][:, :, 1] < 0.372).all(1))
+    lw = n.V[:, 1] < 0.366; n.V[lw, 1] = 0.366                    # straight lower edge instead of a saw-tooth (mesh is in world space)
+    # ...and is replaced by a plain lower face that follows the strip around the nose and tucks under at the bottom
+    s, _, Ms = k.find('front_bumper_SUB1'); ws = world_pos(s, Ms); ws = ws[ws[:, 1] < 0.375]
+    ang = np.arctan2(ws[:, 0], ws[:, 2] - 1.5); rad = np.hypot(ws[:, 0], ws[:, 2] - 1.5)
+    edges = np.linspace(ang.min(), ang.max(), 141); ac = (edges[:-1] + edges[1:]) / 2
+    r = np.array([rad[(ang >= a) & (ang <= b_)].max() if ((ang >= a) & (ang <= b_)).any() else np.nan for a, b_ in zip(edges[:-1], edges[1:])])
+    ok = np.isfinite(r); r = np.interp(ac, ac[ok], r[ok]); r = gaussian_filter(r, 1.0, mode='nearest')
+    path = np.c_[r * np.sin(ac), 1.5 + r * np.cos(ac)]            # (x, z) from the right wheel arch round to the left
+    tg = np.gradient(path, axis=0); tg /= np.linalg.norm(tg, axis=1, keepdims=True)
+    inward = np.c_[-tg[:, 1], tg[:, 0]]; inward *= np.sign((inward * (np.array([0, 1.5]) - path)).sum(1))[:, None]
+    prof = [(0.006, 0.370), (0.006, 0.348), (0.009, 0.326), (0.017, 0.307), (0.031, 0.294), (0.052, 0.287), (0.080, 0.285), (0.120, 0.288)]
+    V = []; F = []; np_ = len(prof)
+    for i, (p, q) in enumerate(zip(path, inward)):
+        for j, (d, y) in enumerate(prof):
+            V.append([p[0] + q[0] * d, y, p[1] + q[1] * d, 0, 0, 0, uv[0], uv[1], tg[i, 0], 0, tg[i, 1]])
+    for i in range(len(path) - 1):
+        for j in range(np_ - 1):
+            a = i * np_ + j; b_ = a + np_; F += [[a, b_, a + 1], [a + 1, b_, b_ + 1]]
+    V = np.array(V, float); F = np.array(F, np.int64)
+    from kn5io import weld_normals
+    nr = unit(weld_normals(V[:, :3], F)); out = V[:, :3] - np.array([0, 0.30, 1.5]); nr *= np.sign((nr * out).sum(1))[:, None]
+    V[:, 3:6] = nr
+    k.add_mesh('BUMPER_LOWER', V, fix_winding(V, F), n.mat)
+    info['lower_face_verts'] = len(V)
+    # the black underbody used to hide behind the lip; pull its nose back inside the new bumper
+    c_, _, Mc = k.find('chasis')
+    def tuck(w):
+        w = w.copy(); a_ = np.arctan2(w[:, 0], w[:, 2] - 1.5); rr = np.hypot(w[:, 0], w[:, 2] - 1.5)
+        lim = np.interp(a_, ac, r) - 0.13                        # stay inside the bumper shell
+        m = (w[:, 1] < 0.36) & (w[:, 2] > 1.5) & (np.abs(a_) < ac.max()) & (rr > lim)
+        s_ = np.where(m, lim / np.maximum(rr, 1e-9), 1.0)
+        w[:, 0] *= s_; w[:, 2] = 1.5 + (w[:, 2] - 1.5) * s_
+        lift = ss(1.64, 1.74, w[:, 2])                           # everything ahead of the front tyres
+        w[:, 1] += lift * np.maximum(0.305 - w[:, 1], 0)
+        return w
+    info['underbody_verts'] = deform(c_, Mc, tuck)
+    if FRONT_PLATE:
+        pl, _, Mp = k.find('Rear_Plate_002.001'); deform(pl, Mp, lambda w: w + np.array([0, 0.025, 0.040]))
+    return info
 
 def build(src, out):
     k = Kn5.load(src); info = {}
