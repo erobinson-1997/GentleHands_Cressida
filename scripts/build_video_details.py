@@ -14,7 +14,7 @@ from scipy.ndimage import gaussian_filter
 import config
 from kn5io import Kn5, Material, Node, world_pos, deform, split_mesh, update_bounds, unit
 
-STEPS = ['wheels_black', 'mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade', 'door_numbers', 'front_end']
+STEPS = ['wheels_black', 'mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade', 'door_numbers', 'front_end', 'lower_panel', 'grille', 'clear_lamps']
 PLATE_TEXT = '8XKQ407'          # made-up number (not the real plate); set to None to keep the original mod's plate
 PLATE_MOSAIC = True             # pixelate the number like a censored photo
 FRONT_PLATE = True              # hangs below the front bumper
@@ -413,6 +413,56 @@ def door_numbers(k):
 def drop_tris(n, mask):
     n.F = n.F[~mask]; update_bounds(n); return int(mask.sum())
 
+def bumper_path(k):
+    """outline of the bumper rub strip seen from above, in polar form about (x 0, z 1.5):
+    -> bin angles, radius per bin, (x, z) points from the right wheel arch round to the left, unit tangents, unit inward normals"""
+    s, _, Ms = k.find('front_bumper_SUB1'); ws = world_pos(s, Ms); ws = ws[ws[:, 1] < 0.375]
+    ang = np.arctan2(ws[:, 0], ws[:, 2] - 1.5); rad = np.hypot(ws[:, 0], ws[:, 2] - 1.5)
+    edges = np.linspace(ang.min(), ang.max(), 141); ac = (edges[:-1] + edges[1:]) / 2
+    r = np.array([rad[(ang >= a) & (ang <= b_)].max() if ((ang >= a) & (ang <= b_)).any() else np.nan for a, b_ in zip(edges[:-1], edges[1:])])
+    ok = np.isfinite(r); r = np.interp(ac, ac[ok], r[ok]); r = gaussian_filter(r, 1.0, mode='nearest')
+    path = np.c_[r * np.sin(ac), 1.5 + r * np.cos(ac)]
+    tg = np.gradient(path, axis=0); tg /= np.linalg.norm(tg, axis=1, keepdims=True)
+    inward = np.c_[-tg[:, 1], tg[:, 0]]; inward *= np.sign((inward * (np.array([0, 1.5]) - path)).sum(1))[:, None]
+    return ac, r, path, tg, inward
+
+def sweep(path, tg, inward, prof, uv, caps=False):
+    """sweep a (setback, height) profile along the outline; smooth normals pointing away from the car"""
+    from kn5io import weld_normals
+    V = []; F = []; np_ = len(prof)
+    for i, (p, q) in enumerate(zip(path, inward)):
+        for d, y in prof:
+            V.append([p[0] + q[0] * d, y, p[1] + q[1] * d, 0, 0, 0, uv[0], uv[1], tg[i, 0], 0, tg[i, 1]])
+    for i in range(len(path) - 1):
+        for j in range(np_ - 1):
+            a = i * np_ + j; b_ = a + np_; F += [[a, b_, a + 1], [a + 1, b_, b_ + 1]]
+    V = np.array(V, float); F = np.array(F, np.int64)
+    nr = unit(weld_normals(V[:, :3], F)); mid = np.mean([y for _, y in prof])
+    out = V[:, :3] - np.array([0, mid, 1.5]); out[:, 1] *= 6; nr *= np.sign((nr * out).sum(1))[:, None]
+    V[:, 3:6] = nr
+    if caps:                                                      # flat ends, facing along the outline
+        for i, sgn in ((0, -1.0), (len(path) - 1, 1.0)):
+            c = V[i * np_:(i + 1) * np_].copy(); c[:, 3:6] = [sgn * tg[i, 0], 0, sgn * tg[i, 1]]; o = len(V)
+            V = np.vstack([V, c]); F = np.vstack([F, [[o, o + j, o + j + 1] for j in range(1, np_ - 1)]])
+    return V, fix_winding(V, F)
+
+# ------------------------------------------------------------------ 10b. the panel under the bumper that the valance used to bolt to, with its two amber lamps
+def lower_panel(k):
+    ac, r, path, tg, inward = bumper_path(k)
+    n, _, M = k.find('BUMPER_LOWER'); uv = n.V[0, 6:8]
+    front = path[:, 1] > 1.80                                     # only across the nose; stops short of the wheel arches
+    P, T, I = path[front], tg[front], inward[front]
+    prof = [(0.125, 0.287), (0.060, 0.284), (0.050, 0.279), (0.047, 0.270), (0.047, 0.228), (0.052, 0.216), (0.068, 0.209), (0.100, 0.207), (0.140, 0.210)]
+    V, F = sweep(P, T, I, prof, uv); k.add_mesh('BUMPER_PANEL', V, F, n.mat)
+    k.set_texture('gh_amber.png', flat_texture((214, 112, 26)))
+    mat = simple_material('gh_front_marker', 'gh_amber.png', 0.45, 0.55, 0.45, 60.0); mid = k.add_material(mat)
+    lamp = [(0.050, 0.283), (0.030, 0.281), (0.027, 0.277), (0.027, 0.245), (0.030, 0.241), (0.050, 0.239)]
+    for side in (-1, 1):
+        s = (P[:, 0] * side > 0.40) & (P[:, 0] * side < 0.585)
+        V, F = sweep(P[s], T[s], I[s], lamp, (0.5, 0.5), caps=True)
+        k.add_mesh('FRONT_MARKER_' + 'RL'[side > 0], V, F, mid)
+    return {'panel_verts': int(front.sum()) * len(prof)}
+
 def front_end(k):
     info = {}
     # the aero lip under the bumper goes (the side skirts and the pieces behind the front wheels stay)
@@ -424,14 +474,7 @@ def front_end(k):
     info['bumper_tris'] = drop_tris(n, (w[n.F][:, :, 1] < 0.372).all(1))
     lw = n.V[:, 1] < 0.366; n.V[lw, 1] = 0.366                    # straight lower edge instead of a saw-tooth (mesh is in world space)
     # ...and is replaced by a plain lower face that follows the strip around the nose and tucks under at the bottom
-    s, _, Ms = k.find('front_bumper_SUB1'); ws = world_pos(s, Ms); ws = ws[ws[:, 1] < 0.375]
-    ang = np.arctan2(ws[:, 0], ws[:, 2] - 1.5); rad = np.hypot(ws[:, 0], ws[:, 2] - 1.5)
-    edges = np.linspace(ang.min(), ang.max(), 141); ac = (edges[:-1] + edges[1:]) / 2
-    r = np.array([rad[(ang >= a) & (ang <= b_)].max() if ((ang >= a) & (ang <= b_)).any() else np.nan for a, b_ in zip(edges[:-1], edges[1:])])
-    ok = np.isfinite(r); r = np.interp(ac, ac[ok], r[ok]); r = gaussian_filter(r, 1.0, mode='nearest')
-    path = np.c_[r * np.sin(ac), 1.5 + r * np.cos(ac)]            # (x, z) from the right wheel arch round to the left
-    tg = np.gradient(path, axis=0); tg /= np.linalg.norm(tg, axis=1, keepdims=True)
-    inward = np.c_[-tg[:, 1], tg[:, 0]]; inward *= np.sign((inward * (np.array([0, 1.5]) - path)).sum(1))[:, None]
+    ac, r, path, tg, inward = bumper_path(k)
     prof = [(0.006, 0.370), (0.006, 0.348), (0.009, 0.326), (0.017, 0.307), (0.031, 0.294), (0.052, 0.287), (0.080, 0.285), (0.120, 0.288)]
     V = []; F = []; np_ = len(prof)
     for i, (p, q) in enumerate(zip(path, inward)):
@@ -461,6 +504,83 @@ def front_end(k):
     if FRONT_PLATE:
         pl, _, Mp = k.find('Rear_Plate_002.001'); deform(pl, Mp, lambda w: w + np.array([0, 0.025, 0.040]))
     return info
+
+# ------------------------------------------------------------------ 11. grille: black with horizontal bright bars, old crest + TOYOTA badge
+def components(p, F):
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    key = np.round(p * 1e4).astype(np.int64); _, wid = np.unique(key, axis=0, return_inverse=True); wid = wid.ravel()
+    e = np.r_[np.c_[wid[F[:, 0]], wid[F[:, 1]]], np.c_[wid[F[:, 1]], wid[F[:, 2]]]]
+    nc, lab = connected_components(coo_matrix((np.ones(len(e)), (e[:, 0], e[:, 1])), shape=(wid.max() + 1,) * 2), directed=False)
+    return nc, lab[wid]
+
+def badge_image(w=512, h=256):
+    im = Image.new('RGBA', (w, h), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
+    silver, edge, field = (206, 210, 214, 255), (120, 124, 130, 255), (34, 36, 40, 255)
+    def shield(cx, cy, sx, sy):
+        return [(cx - sx, cy - sy), (cx + sx, cy - sy), (cx + sx, cy + 0.25 * sy), (cx, cy + sy), (cx - sx, cy + 0.25 * sy)]
+    cx, cy = 80, 128
+    d.polygon(shield(cx, cy, 62, 110), fill=edge); d.polygon(shield(cx, cy, 56, 102), fill=silver); d.polygon(shield(cx, cy, 44, 86), fill=field)
+    d.polygon([(cx - 34, cy - 62), (cx + 34, cy - 62), (cx + 34, cy - 40), (cx + 10, cy - 40), (cx + 10, cy + 40), (cx - 10, cy + 40), (cx - 10, cy - 40), (cx - 34, cy - 40)], fill=silver)
+    d.polygon([(cx - 34, cy - 22), (cx - 18, cy - 22), (cx - 18, cy + 22), (cx, cy + 58), (cx + 18, cy + 22), (cx + 18, cy - 22), (cx + 34, cy - 22), (cx + 34, cy + 28), (cx, cy + 74), (cx - 34, cy + 28)], fill=silver)
+    f = font(['arialbd.ttf'], 150)
+    g = Image.new('L', (1400, 300), 0); ImageDraw.Draw(g).text((10, 10), 'T O Y O T A', font=f, fill=255)
+    g = g.crop(g.getbbox()).resize((330, 70), Image.LANCZOS)
+    sh = Image.new('RGBA', g.size, edge); sh.putalpha(g.filter(ImageFilter.MaxFilter(5))); im.alpha_composite(sh, (170, 93))
+    tx = Image.new('RGBA', g.size, silver); tx.putalpha(g); im.alpha_composite(tx, (170, 93))
+    return im
+
+def grille(k):
+    info = {}
+    n, parent, M = k.find('radiator_grill'); w = world_pos(n, M); nc, lab = components(w, n.F)
+    size = np.array([w[lab == c].max(0) - w[lab == c].min(0) for c in range(nc)])
+    vert = np.where((size[:, 0] < 0.01) & (size[:, 1] > 0.10))[0]; horiz = np.where((size[:, 1] < 0.02) & (size[:, 0] > 0.6))[0]
+    assert len(vert) == 19 and len(horiz) == 3, (len(vert), len(horiz))
+    # extra bright bars between / below the three the mesh has (copies of them, following the lean of the grille)
+    order = horiz[np.argsort([w[lab == c][:, 1].min() for c in horiz])]
+    addV = []; addF = []; off = len(n.V)
+    for c, (dy, dz) in ((order[0], (-0.015, 0.001)), (order[0], (0.015, -0.001)), (order[1], (0.015, -0.005)), (order[2], (0.015, -0.007))):
+        vi = np.where(lab == c)[0]; remap = -np.ones(len(n.V), np.int64); remap[vi] = np.arange(len(vi)) + off
+        V = n.V[vi].copy(); V[:, 1] += dy; V[:, 2] += dz                       # mesh is in world space
+        tri = n.F[np.isin(n.F[:, 0], vi)]; addV.append(V); addF.append(remap[tri]); off += len(vi)
+    is_vert = np.isin(lab, vert)
+    n.V = np.vstack([n.V] + addV); n.F = np.vstack([n.F] + addF)
+    is_vert = np.r_[is_vert, np.zeros(len(n.V) - len(is_vert), bool)]
+    V, F = split_mesh(n, is_vert[n.F].all(1))                                 # the uprights become black plastic
+    m = Node(2, 'grille_uprights'); m.V = V; m.F = F; m.mat = k.mat_id('plastic_black1'); update_bounds(m); parent.children.append(m)
+    info['uprights'] = len(V); info['bars_added'] = len(addV)
+    # modern oval off, crest + lettering on
+    for name in ('logo_part002', 'logo_part001'):
+        nd, par, _ = k.find(name); par.children.remove(nd)
+    k.set_texture('gh_grille_badges.png', png_bytes(badge_image()))
+    mat = simple_material('gh_grille_badges', 'gh_grille_badges.png', 0.50, 0.50, 0.60, 40.0, shader='ksPerPixelAT', alpha_ref=0.5); mat.alpha_tested = 1
+    mid = k.add_material(mat)
+    n, _, M = k.find('radiator_grill'); w = world_pos(n, M)
+    def front(x, y0, y1):
+        s = w[(np.abs(w[:, 0] - x) < 0.03) & (w[:, 1] > y0) & (w[:, 1] < y1)]; return s[:, 2].max() + 0.004
+    b = Builder()
+    z = front(0.0, 0.49, 0.58)
+    b.poly([(-0.030, 0.492, z), (0.030, 0.492, z), (0.030, 0.574, z - 0.004), (-0.030, 0.574, z - 0.004)], (0, 0, 1), [(0, 1), (0.3125, 1), (0.3125, 0), (0, 0)])
+    xa, xb = 0.160, 0.300; za, zb = front(xa, 0.46, 0.50), front(xb, 0.46, 0.50)
+    b.poly([(xa, 0.4735, za), (xb, 0.4735, zb), (xb, 0.4935, zb), (xa, 0.4935, za)], (0, 0, 1), [(0.33, 0.66), (0.98, 0.66), (0.98, 0.34), (0.33, 0.34)])
+    V, F = b.done(); k.add_mesh('GRILLE_BADGES', V, F, mid, shadows=0)
+    return info
+
+
+# ------------------------------------------------------------------ 12. headlight + corner lenses: clear, slightly hazed, instead of smoked
+def clear_lamps(k):
+    t = [t for t in k.textures if t[1] == 'cressida_lights.dds'][0]
+    a = np.asarray(Image.open(io.BytesIO(t[2])).convert('RGBA')).astype(float); S = a.shape[0]
+    yy, xx = np.mgrid[0:S, 0:S] / S
+    head = (xx > 0.685) & (yy > 0.245); corner = (xx < 0.343) & (yy > 0.598); reg = head | corner   # lens islands of the atlas
+    lines = np.clip((a[..., :3].mean(2) - 24) * 3.0, 0, 60)[..., None]        # keep the moulded fluting, just lighter
+    clear = np.where(corner[..., None], np.array([226, 138, 36.0]), np.array([196, 200, 198.0])) + lines   # corner lamps are amber
+    a[..., :3] = np.where(reg[..., None], clear, a[..., :3])
+    a[..., 3] = np.where(corner, 150, np.where(head, 78, a[..., 3]))
+    b = io.BytesIO(); Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), 'RGBA').save(b, format='DDS', pixel_format='DXT5')
+    new = bytes(t[2][:128]) + b.getvalue()[128:]
+    assert len(new) == len(t[2]); t[2] = new
+    return {'texels': int(reg.sum())}
 
 def build(src, out):
     k = Kn5.load(src); info = {}
