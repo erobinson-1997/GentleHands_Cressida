@@ -14,8 +14,9 @@ from scipy.ndimage import gaussian_filter
 import config
 from kn5io import Kn5, Material, Node, world_pos, deform, split_mesh, update_bounds, unit
 
-STEPS = ['wheels_black', 'mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker']
-PLATE_TEXT = '2MVZ023'          # set to None to keep the original mod's plate
+STEPS = ['wheels_black', 'mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade']
+PLATE_TEXT = '8XKQ407'          # made-up number (not the real plate); set to None to keep the original mod's plate
+PLATE_MOSAIC = True             # pixelate the number like a censored photo
 FRONT_PLATE = False             # the real car runs no front plate
 FONTS = r'C:\Windows\Fonts'
 
@@ -149,6 +150,12 @@ def plate_image(text, w=390, h=192, ss=4):
         d.ellipse([(x0 - 6) * ss, 172 * ss, (x0 + 6) * ss, 184 * ss], fill=(70, 70, 70))
     d.rectangle([40 * ss, 166 * ss, W - 40 * ss, 168 * ss], fill=(200, 200, 196))
     im = im.resize((w, h), Image.LANCZOS)
+    if PLATE_MOSAIC:
+        box = (int(w * 0.04), int(h * 0.27), int(w * 0.96), int(h * 0.83)); nx, ny = 23, 7
+        tile = im.crop(box).resize((nx, ny), Image.BOX)
+        a = np.asarray(tile).astype(float); a += np.random.default_rng(5).uniform(-22, 22, (ny, nx, 1))   # blocks never line up into digits
+        tile = Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), 'RGB')
+        im.paste(tile.resize((box[2] - box[0], box[3] - box[1]), Image.NEAREST), box[:2])
     dirt = noise((h, w), 6, 3)[..., None]
     return Image.fromarray(np.clip(np.asarray(im).astype(float) * (0.86 + 0.14 * dirt), 0, 255).astype(np.uint8), 'RGB')
 
@@ -237,43 +244,49 @@ def quarter_crease(k):
     return info
 
 
-# ------------------------------------------------------------------ 6. left (driver) mirror: unpainted grey shell with a tan patch
+# ------------------------------------------------------------------ 6. mirrors: dull grey shells with a worn-through tan patch
 def mirror_texture(size=256, seed=11):
-    grey = np.array([116, 117, 120.0]); tan = np.array([198, 168, 98.0])
+    """grey everywhere except one ragged, speckled tan blob centred at (0.55, 0.36)"""
+    grey = np.array([104, 108, 114.0]); tan = np.array([204, 172, 104.0])
     yy, xx = np.mgrid[0:size, 0:size] / size
-    edge = noise((size, size), 9, seed); fine = noise((size, size), 0.9, seed + 1)
-    m = (1 - ss(0.50, 0.72, yy + 0.25 * (edge - 0.5))) * ss(0.10, 0.26, xx + 0.2 * (edge - 0.5))
-    m *= 0.55 + 0.45 * (fine > 0.35)                               # sanded-through speckle
-    img = (grey * (1 - m[..., None]) + tan * m[..., None]) * (0.90 + 0.20 * fine[..., None])
+    edge = noise((size, size), 7, seed); fine = noise((size, size), 0.8, seed + 1); streak = noise((size, size), (1.0, 5.0), seed + 2)
+    r = np.hypot((xx - 0.55) / 0.36, (yy - 0.36) / 0.21)
+    m = np.clip((1.0 - r + 0.55 * (edge - 0.5)) / 0.30, 0, 1)
+    m = m * (streak > 0.62 - 0.45 * m)                            # solid in the middle, breaking into flecks at the rim
+    img = (grey * (1 - m[..., None]) + tan * m[..., None]) * (0.92 + 0.16 * fine[..., None])
     return Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), 'RGB')
 
 def mirror_primer(k):
     k.set_texture('gh_mirror_primer.png', png_bytes(mirror_texture()))
-    mid = k.add_material(simple_material('gh_mirror_primer', 'gh_mirror_primer.png', 0.38, 0.45, 0.10, 12.0))
-    n, parent, M = k.find('mirrors'); w = world_pos(n, M)
-    V, F = split_mesh(n, (w[n.F][:, :, 0] > 0).all(1))
-    lo, hi = V[:, :3].min(0), V[:, :3].max(0)
-    V[:, 6] = (V[:, 0] - lo[0]) / (hi[0] - lo[0])                  # planar map seen from the front: u outboard, v down
-    V[:, 7] = (hi[1] - V[:, 1]) / (hi[1] - lo[1])
-    m = Node(2, 'mirror_L_primer'); m.V = V; m.F = F; m.mat = mid; update_bounds(m); parent.children.append(m)
-    return len(V)
-
+    mid = k.add_material(simple_material('gh_mirror_primer', 'gh_mirror_primer.png', 0.38, 0.45, 0.14, 14.0))
+    n, parent, M = k.find('mirrors'); n.mat = mid                 # both mirrors; the mesh sits in world space
+    x = np.abs(n.V[:, 0]); y = n.V[:, 1]
+    u = (x - 0.80) / 0.14; v = (0.907 - y) / 0.107                # housing seen from the front: u outboard, v down
+    left = n.V[:, 0] > 0
+    # driver side: the patch covers the upper middle of the shell. passenger side: a smaller patch near the top
+    u = np.where(left, u, 0.55 + (u - 0.50) * 1.9); v = np.where(left, v, 0.36 + (v - 0.14) * 1.9)
+    back = n.V[:, 5] < -0.3                                       # the mirror surround (faces rearward) stays plain
+    n.V[:, 6] = np.where(back, 0.02, np.clip(u, 0.01, 0.99)); n.V[:, 7] = np.where(back, 0.98, np.clip(v, 0.01, 0.99))
+    return len(n.V)
 
 # ------------------------------------------------------------------ 7. "TIRE STREETS" sticker, left rear door glass
-def sticker_image(w=1024, h=420):
-    im = Image.new('RGBA', (w, h), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
-    f1 = font(['impact.ttf', 'arialbd.ttf'], 230); f2 = font(['impact.ttf', 'arialbd.ttf'], 150)
-    d.text((w / 2 + 20, 118), 'TIRE', font=f1, fill=(120, 232, 46, 255), anchor='mm', stroke_width=10, stroke_fill=(16, 22, 16, 255))
-    d.text((w / 2 - 30, 318), 'STREETS', font=f2, fill=(232, 232, 236, 255), anchor='mm', stroke_width=7, stroke_fill=(40, 40, 46, 255))
-    im = im.transform((w, h), Image.AFFINE, (1, 0.22, -0.22 * h / 2, 0, 1, 0), Image.BICUBIC)   # lean it like the logo
-    return im
-
+def sticker_image(w=1024, h=440):
+    def word(text, size, fill, stroke, sw, box):
+        f = font(['impact.ttf', 'arialbd.ttf'], size)
+        im = Image.new('RGBA', (size * len(text), size * 2), (0, 0, 0, 0))
+        ImageDraw.Draw(im).text((sw + 4, sw + 4), text, font=f, fill=fill, stroke_width=sw, stroke_fill=stroke)
+        return im.crop(im.getbbox()).resize(box, Image.LANCZOS)
+    im = Image.new('RGBA', (w, h), (0, 0, 0, 0)); lean = 0.20; pad = int(lean * h / 2) + 4
+    a = word('TIRE', 260, (120, 232, 46, 255), (16, 22, 16, 255), 12, (w - 2 * pad - 60, int(h * 0.54)))
+    b = word('STREETS', 200, (232, 232, 236, 255), (40, 40, 46, 255), 9, (w - 2 * pad - 60, int(h * 0.38)))
+    im.alpha_composite(a, (pad + 60, 6)); im.alpha_composite(b, (pad, h - b.size[1] - 6))
+    return im.transform((w, h), Image.AFFINE, (1, lean, -lean * h / 2, 0, 1, 0), Image.BICUBIC)   # lean it like the logo
 def window_sticker(k):
     k.set_texture('gh_sticker.png', png_bytes(sticker_image()))
     m = simple_material('gh_sticker', 'gh_sticker.png', 0.45, 0.45, 0.05, 10.0, shader='ksPerPixelAT', alpha_ref=0.5)
     m.alpha_tested = 1; mid = k.add_material(m)
     n, _, M = k.find('window_ext'); w = world_pos(n, M)
-    z0, z1, y0, y1 = -0.44, -0.90, 0.955, 1.145                    # front edge, rear edge, bottom, top
+    z0, z1, y0, y1 = -0.40, -0.90, 0.950, 1.165                    # front edge, rear edge, bottom, top
     g = w[(w[:, 0] > 0.5) & (w[:, 2] < z0 + 0.05) & (w[:, 2] > z1 - 0.05) & (w[:, 1] > y0 - 0.05) & (w[:, 1] < y1 + 0.05)]
     A = np.c_[np.ones(len(g)), g[:, 1], g[:, 2]]; coef = np.linalg.lstsq(A, g[:, 0], rcond=None)[0]   # glass plane x(y,z)
     nrm = np.array([1.0, -coef[1], -coef[2]]); nrm /= np.linalg.norm(nrm)
@@ -290,6 +303,50 @@ def window_sticker(k):
     k.add_mesh('WINDOW_STICKER', V, F, mid, shadows=0)
     return {'glass_points': len(g), 'plane': [round(float(c), 3) for c in coef]}
 
+
+# ------------------------------------------------------------------ 8. hood: sun-faded, cloudy clear coat (painted into the body texture)
+def dxt5_with_mips(rgb, alpha, header):
+    """2048x2048 DXT5 with 12 mips; mips are built from colour only (this texture's alpha is all zero - see paint.py)"""
+    def block(rgba):
+        b = io.BytesIO(); rgba.save(b, format='DDS', pixel_format='DXT5'); return b.getvalue()[128:]
+    levels = []; w = rgb.size[0]
+    while w >= 1:
+        if w >= 4:
+            lv = rgb if w == rgb.size[0] else rgb.resize((w, w), Image.BOX if w >= 512 else Image.LANCZOS)
+            al = alpha if w == rgb.size[0] else alpha.resize((w, w), Image.NEAREST)
+            levels.append(block(Image.merge('RGBA', (*lv.split(), al))))
+        else:
+            px = rgb.resize((w, w), Image.BOX).resize((4, 4), Image.NEAREST)
+            levels.append(block(Image.merge('RGBA', (*px.split(), Image.new('L', (4, 4), max(alpha.getextrema()))))))
+        w //= 2
+    return bytes(header) + b''.join(levels)
+
+def hood_fade(k):
+    t = [t for t in k.textures if t[1] == 'carpaint_diffuse.dds'][0]
+    src = Image.open(io.BytesIO(t[2])).convert('RGBA'); a = np.asarray(src).astype(float); S = a.shape[0]
+    n, _, M = k.find('bonnet'); w = world_pos(n, M); uv = n.V[:, 6:8].astype(float)
+    cu = np.linalg.lstsq(np.c_[np.ones(len(w)), w[:, 0], w[:, 2]], uv[:, 0], rcond=None)[0]     # the hood is a flat top-down unwrap
+    cv = np.linalg.lstsq(np.c_[np.ones(len(w)), w[:, 0], w[:, 2]], np.mod(uv[:, 1], 1.0), rcond=None)[0]
+    px0, px1 = int(uv[:, 0].min() * S) - 2, int(uv[:, 0].max() * S) + 3
+    py0, py1 = int(np.mod(uv[:, 1], 1.0).min() * S) - 2, int(np.mod(uv[:, 1], 1.0).max() * S) + 3
+    yy, xx = np.mgrid[py0:py1, px0:px1]; U = (xx + 0.5) / S; Vv = (yy + 0.5) / S
+    A = np.array([[cu[1], cu[2]], [cv[1], cv[2]]]); xz = np.linalg.solve(A, np.stack([U.ravel() - cu[0], Vv.ravel() - cv[0]]))
+    X = xz[0].reshape(U.shape); Z = xz[1].reshape(U.shape)                                         # world position of every hood texel
+    cloud = noise(U.shape, 38, 21); mott = noise(U.shape, 9, 22); fine = noise(U.shape, 1.0, 23)
+    centre = np.exp(-(X / 0.62) ** 2) * ss(0.78, 1.00, Z) * (1 - ss(1.90, 2.04, Z))                # strongest down the middle, clean at the edges
+    m = np.clip((0.62 * cloud + 0.38 * mott - 0.36) / 0.22, 0, 1) * (0.35 + 0.65 * centre)
+    dark = 0.45 * np.exp(-((X + 0.05) / 0.22) ** 2 - ((Z - 1.62) / 0.20) ** 2)                       # the darker blotch near the front centre
+    chalk = np.array([118, 124, 134.0])
+    reg = a[py0:py1, px0:px1, :3]
+    out = reg * (1 - 0.55 * m[..., None]) + chalk * 0.55 * m[..., None]
+    out *= (1 - 0.28 * dark[..., None]) * (0.97 + 0.06 * fine[..., None])
+    a[py0:py1, px0:px1, :3] = np.where(reg.sum(2, keepdims=True) > 30, out, reg)                    # leave the black gutter between islands alone
+    rgb = Image.fromarray(np.clip(a[..., :3], 0, 255).astype(np.uint8), 'RGB')
+    dds = dxt5_with_mips(rgb, Image.fromarray(a[..., 3].astype(np.uint8)), t[2][:128])
+    assert len(dds) == len(t[2]); t[2] = dds
+    skin = config.PROJECT / 'gentlehands_toyota_cressida_mx83' / 'skins' / 'silver_176' / 'carpaint_diffuse.dds'
+    if skin.exists(): skin.write_bytes(dds)                       # the skin's copy overrides the one inside the kn5
+    return {'texels': [px0, py0, px1, py1], 'coverage': round(float((m > 0.3).mean()), 2), 'skin': skin.exists()}
 
 def build(src, out):
     k = Kn5.load(src); info = {}
