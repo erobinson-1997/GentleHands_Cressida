@@ -474,19 +474,18 @@ def lower_panel(k):
     mid = k.add_material(simple_material('gh_front_marker', 'gh_amber.png', 0.45, 0.55, 0.45, 60.0))
     # the piece the valance bolted to is one part right round the nose: a body-colour lip along the bottom, and above it
     # (outboard of the lamps only) a grey plastic face. Nearly flush with the bumper along the sides, set back across the front.
-    # Seen from the side the face is an S: it starts just behind the bumper's lower edge, sweeps back, drops, and curls
-    # under; the lip on its own (centre of the car, where the face is cut away) is the lower half of that S, a C.
+    # Seen from the side face + lip are one smooth S: out from behind the bumper's lower edge (and behind the lamps), back
+    # and down, forward again into a belly, then tucked under; the lip alone (centre, face cut away) is the lower half, a C.
     back = 0.040 * ss(1.72, 1.95, z)
-    lip = [(0.100, 0.247), (0.066, 0.246), (0.062, 0.243), (0.060, 0.225), (0.056, 0.208), (0.060, 0.196), (0.068, 0.189), (0.085, 0.186), (0.120, 0.188)]
+    lip = [(0.110, 0.252), (0.086, 0.252), (0.080, 0.250), (0.078, 0.236), (0.068, 0.222), (0.062, 0.210), (0.062, 0.200), (0.068, 0.192), (0.082, 0.187), (0.120, 0.186)]
     part('BUMPER_PANEL', np.ones(len(x), bool), lip, n.mat, uv, shift=back)
-    face = [(0.050, 0.296), (0.022, 0.292), (0.030, 0.280), (0.050, 0.262), (0.060, 0.250), (0.062, 0.243)]
+    face = [(0.048, 0.318), (0.048, 0.296), (0.056, 0.280), (0.072, 0.264), (0.080, 0.250)]   # starts up behind the bumper edge and the lamps
     for side in (-1, 1):
         nm = 'RL'[side > 0]; xs = x * side
         lamp = nose & (xs > LAMP_X[0]) & (xs < LAMP_X[1]); pocket = nose & (xs > LAMP_X[0] - 0.012) & (xs < LAMP_X[1] + 0.012)
         part('FRONT_MARKER_' + nm, lamp, [(0.080, 0.304), (0.048, 0.303), (0.046, 0.300), (0.046, 0.266), (0.048, 0.263), (0.080, 0.262)], mid)
-        part('FRONT_MARKER_HOUSING_' + nm, pocket, [(0.118, 0.310), (0.053, 0.309), (0.053, 0.257), (0.118, 0.256)], black)
-        part('BUMPER_FLAP_' + nm, (xs > LAMP_X[0] - 0.03) | ((xs > 0) & ~nose), face, k.mat_id('gh_mudflap'),
-             shift=back, ytop=np.where(pocket, 0.253, 9.0))
+        part('FRONT_MARKER_HOUSING_' + nm, pocket, [(0.090, 0.310), (0.053, 0.309), (0.053, 0.262), (0.090, 0.261)], black)
+        part('BUMPER_FLAP_' + nm, (xs > LAMP_X[0] - 0.03) | ((xs > 0) & ~nose), face, k.mat_id('gh_mudflap'), shift=back)
     return {'stations': len(path)}
 
 def front_end(k):
