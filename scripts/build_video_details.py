@@ -14,7 +14,7 @@ from scipy.ndimage import gaussian_filter
 import config
 from kn5io import Kn5, Material, Node, world_pos, deform, split_mesh, update_bounds, unit
 
-STEPS = ['wheels_black', 'mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade', 'door_numbers', 'front_end', 'lower_panel', 'grille', 'clear_lamps', 'taillight_damage', 'pinstripe', 'paint_damage']
+STEPS = ['wheels_black', 'mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade', 'door_numbers', 'front_end', 'lower_panel', 'grille', 'clear_lamps', 'taillight_damage', 'trunk_face', 'pinstripe', 'paint_damage']
 PLATE_TEXT = '8XKQ407'          # made-up number (not the real plate); set to None to keep the original mod's plate
 PLATE_MOSAIC = True             # pixelate the number like a censored photo
 FRONT_PLATE = True              # hangs below the front bumper
@@ -815,7 +815,7 @@ def paint_damage_image():
     over((226, 228, 232), 0.75 * spot * lid)
     over((158, 120, 104), 0.50 * soft(lambda d: d.ellipse((330, 144, 452, 180), fill=255), 9) * blot * lid)       # rust in the top lobe
     over((184, 192, 208), 0.62 * tail * (0.45 + 0.55 * np.clip(0.5 + 0.6 * streaks(80, 33, (1.2, 22)), 0, 1)) * lid)
-    # (what is left of the pinstripe here is the PINSTRIPE mesh itself: on the trunk lid it lies on top of this decal)
+    # (what is left of the pinstripe here is the PINSTRIPE mesh itself, showing through this decal where the scrape is thin)
     # body corner: scraped nearly black, pale brush marks mostly low down
     m = Image.new('L', (PD_W, PD_H), 0)
     ImageDraw.Draw(m).polygon([(505, 330), (640, 215), (800, 290), (810, 520), (770, 655), (505, 665)], fill=255)
@@ -861,7 +861,7 @@ def stripe_y(z):
 # (build_rear_damage.py: total(), trunk_extra()); uncrashed() inverts it numerically.
 def _ck(w, C, R):
     r2 = (((w - np.array(C)) / np.array(R)) ** 2).sum(1); return np.where(r2 < 1, (1 - r2) ** 2, 0.0)
-def crash_field(w, trunk=False):
+def crash_field(w, trunk=False, calm=0.0):
     k1 = _ck(w, (-0.80, 0.60, -2.47), (0.55, 0.52, 0.78)); k2 = _ck(w, (-0.76, 0.34, -2.33), (0.40, 0.30, 0.50))
     s_ = w @ np.array([0.86, 0.15, -0.48]); q = np.array([0.35, 0.45, 0.82]); q /= np.linalg.norm(q)
     wr1 = 0.03 * np.sin(26 * s_ + 2.0 * np.sin(9 * w[:, 1] + 3 * w[:, 0])); wr2 = 0.045 * np.sin(34 * s_ + 3.0 * np.sin(13 * w[:, 0] + 7 * w[:, 1]))
@@ -878,8 +878,19 @@ def crash_field(w, trunk=False):
         k = _ck(w, (-0.66, 0.82, -2.40), (0.40, 0.28, 0.60)); up = ss(0.60, 0.80, w[:, 1])
         wr = 0.02 * np.sin(31 * (w[:, 0] * 0.8 + w[:, 2] * 0.6) + 2 * np.sin(11 * w[:, 0]))
         d = np.c_[0.045 * np.ones(len(w)), 0.075 * up, 0.030 * np.ones(len(w))] * (k * (0.7 + 0.3 * np.sin(15 * w[:, 0] + 9 * w[:, 2])))[:, None]
-        d[:, 1] += wr * k * up; w = w + d
+        d[:, 1] += wr * k * up; w = w + d * (1.0 - np.asarray(calm, float).reshape(-1, 1))
     return w
+
+def trunk_face(k):
+    """Stage 1 crumpled the whole right half of the trunk lid, its rear face included. On the real car only the top of the lid
+    is crumpled at the corner; the rear face (pinstripe, badge) is still flat and just leans with the tail light. So the extra
+    lid crumple is taken off the rear face again, fading out where the face rolls over into the top of the lid."""
+    n, _, M = k.find('trunk')
+    def fn(w):
+        p0 = uncrashed(w, True); n.p0 = p0
+        calm = (1 - ss(0.775, 0.805, p0[:, 1])) * (1 - ss(-2.40, -2.36, p0[:, 2]))
+        return crash_field(p0, True, calm)
+    return {'moved': deform(n, M, fn, thr=1e-4)}
 
 def uncrashed(w, trunk=False):
     """where each point of the crashed body was before the crash (Newton iteration on crash_field)"""
@@ -919,7 +930,7 @@ def pinstripe(k):
     for name in ('f_fenders', 'lf_door', 'rf_door', 'rear_doors', 'r_fenders', 'trunk'):
         n, _, M = k.find(name); w = world_pos(n, M); nr = unit(n.V[:, 3:6] @ M[:3, :3])
         V = np.zeros((len(w), 11)); V[:, :3] = w; V[:, 3:6] = nr; V[:, 6:8] = 0.5; V[:, 8:11] = [0, 0, 1]
-        p0 = uncrashed(w, name == 'trunk')                               # the panel before the crash: the stripe is laid out there
+        p0 = n.p0 if hasattr(n, 'p0') else uncrashed(w, name == 'trunk')                               # the panel before the crash: the stripe is laid out there
         f = p0[:, 1] - stripe_y(p0[:, 2])
         tri = p0[n.F]; fn = unit(np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])); c = tri.mean(1)
         fn *= np.where((fn * nr[n.F].mean(1)).sum(1) < 0, -1.0, 1.0)[:, None]
@@ -929,7 +940,7 @@ def pinstripe(k):
         for lo, hi in STRIPE_BANDS:
             v_, f_ = clip_band(V, F, f, lo, hi)
             if len(v_):
-                v_[:, 3:6] = unit(v_[:, 3:6]); v_[:, :3] += v_[:, 3:6] * (0.0022 if name == 'trunk' else 0.0008)   # trunk: above the paint-damage decal, so the stripe still shows across the scrape
+                v_[:, 3:6] = unit(v_[:, 3:6]); v_[:, :3] += v_[:, 3:6] * 0.0008
                 Vs.append(v_); Fs.append(f_ + off); off += len(v_)
     V = np.vstack(Vs); F = np.vstack(Fs)
     keep = (V[F][:, :, 2] <= STRIPE_FRONT_Z).all(1); F = F[keep]
