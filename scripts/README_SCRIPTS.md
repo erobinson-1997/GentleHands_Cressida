@@ -46,7 +46,7 @@ and writes `dist/ggh_toyota_cressida_mx83_stage_1.kn5`. The stage-1 file is the 
 restored with `git show cc7ebdd:gentlehands_toyota_cressida_mx83/ggh_toyota_cressida_mx83_stage_1.kn5 > originals/stage1_rear_damage.kn5`
 (run that from Git Bash or cmd, not PowerShell, which corrupts binary redirects). No FBX is needed for this stage.
 
-Steps (switch on/off in `STEPS` at the top of the script): satin-black wheels, four mud flaps, bare/rusty bash bar,
+Steps (switch on/off in `STEPS` at the top of the script): four mud flaps, bare/rusty bash bar,
 California plate with a made-up, mosaic-censored number (`PLATE_TEXT`, `PLATE_MOSAIC`, `FRONT_PLATE`), the crease
 ahead of the fuel door, worn mirrors, the TIRE STREETS sticker on the left rear door glass, a faint hood fade (also
 written to `skins/silver_176/carpaint_diffuse.dds`), door number panels (`RACE_NUMBER`), the US-style front bumper
@@ -55,3 +55,14 @@ headlight lenses with amber corners, and the broken outer end of the right tail 
 
 - kn5io.py     full kn5 load/edit/save (round trip is byte-identical); mesh split, subdivide-safe deform helpers
 - preview.py   software render of a kn5 for a quick look without the game: `python scripts/preview.py <kn5> <out_dir> [view ...]`
+
+### Skins
+
+`build_video_details.py` also writes two skins next to `skins/silver_176` (the base skin: stickers, silver AVS Model 5 wheels):
+
+- `silver_176_no_stickers` - clear `gh_sticker.png` and `gh_number_panel.png` hide the window sticker and the door numbers.
+- `silver_176_pine` - `gh_debris.png` (pine needles, sap, grit) shows on `DEBRIS_LAYER`, a shell just above the top of the car that is clear in the model itself; flat
+  wheel textures (`MKII_Grey.png`, `MKIII_Grey.png`, `SSR_*_Map.png`) make the wheels matte black.
+
+A skin can only swap textures, so other wheel designs need their own 3D model. `preview.jpg` / `livery.png` are copied from the base skin only when missing:
+regenerate the previews in Content Manager.
