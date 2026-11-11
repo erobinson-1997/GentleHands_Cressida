@@ -1301,9 +1301,9 @@ PASS_BACK = [(-0.335, 0.360, 0.262, 0.020), (-0.325, 0.450, 0.275, 0.045), (-0.3
              (-0.400, 0.760, 0.250, 0.020), (-0.414, 0.805, 0.205, 0.004), (-0.420, 0.822, 0.140, 0.000)]
 PASS_HEAD = [(-0.436, 0.842, 0.090, 0.000), (-0.430, 0.868, 0.132, 0.000), (-0.436, 0.950, 0.135, 0.000), (-0.446, 1.000, 0.122, 0.000),
              (-0.452, 1.018, 0.070, 0.000)]
-VELOUR_RGB = (124, 128, 135)
+VELOUR_RGB = (106, 110, 117)
 
-def loft(path, xc, v0, v1, thick, stations=22, nu=17):
+def loft(path, xc, v0, v1, thick, stations=40, nu=27):
     """a cushion: `path` rows are z, y of the centre line of its face, half width, bolster height; thick = (at the edge, extra in the middle)"""
     from scipy.interpolate import PchipInterpolator
     path = np.asarray(path, float); d = np.r_[0, np.cumsum(np.linalg.norm(np.diff(path[:, :2], axis=0), axis=1))]; f = PchipInterpolator(d / d[-1], path)
@@ -1334,7 +1334,7 @@ def velour_image(size=1024, seed=81):
     px = lambda u: (0.02 + 0.46 * (u + 1) / 2) * S
     panels = [(px(-0.60), 0.035 * S, px(0.60), 0.300 * S), (px(-0.60), 0.385 * S, px(0.60), 0.690 * S)]       # centre inserts of cushion and backrest
     ins = mask(lambda d: [d.rounded_rectangle(b_, radius=34, fill=255) for b_ in panels], 1.0)
-    over((142, 146, 152), 0.85 * ins); img *= (1 - 0.13 * ins * (0.5 + 0.5 * np.sin(xx * 2 * np.pi / 7.0)))[..., None]   # ribbed cloth, ribs running fore and aft
+    over((122, 126, 133), 0.85 * ins); img *= (1 - 0.13 * ins * (0.5 + 0.5 * np.sin(xx * 2 * np.pi / 7.0)))[..., None]   # ribbed cloth, ribs running fore and aft
     over((66, 68, 74), 0.75 * mask(lambda d: [d.rounded_rectangle(b_, radius=34, outline=255, width=5) for b_ in panels], 1.3))
     over((66, 68, 74), 0.55 * mask(lambda d: [d.line([(px(-0.60), r_ * S), (px(0.60), r_ * S)], fill=255, width=3) for r_ in (0.17, 0.49, 0.59)], 1.2))
     img[:, S // 2:] *= 0.93
@@ -1346,7 +1346,7 @@ def remove_mesh(k, name):
 def passenger_seat(k):
     gone = remove_mesh(k, 'seatleather1') + remove_mesh(k, 'seatleather2')                # by now only the passenger seat is left in them
     parts = [loft(PASS_CUSHION, PASS_X, 0.01, 0.32, (0.075, 0.035)), loft(PASS_BACK, PASS_X, 0.35, 0.73, (0.060, 0.045)),
-             loft(PASS_HEAD, PASS_X, 0.77, 0.99, (0.050, 0.035), stations=12, nu=13)]
+             loft(PASS_HEAD, PASS_X, 0.77, 0.99, (0.050, 0.035), stations=24, nu=23)]
     k.set_texture('gh_velour.png', png_bytes(velour_image()))
     k.add_mesh('PASSENGER_SEAT', *join(*parts), k.add_material(simple_material('gh_velour', 'gh_velour.png', 0.42, 0.48, 0.03, 5.0)))
     posts = [box((PASS_X + sx * 0.055 - 0.006, 0.79, -0.462), (PASS_X + sx * 0.055 + 0.006, 0.86, -0.450)) for sx in (-1, 1)]
@@ -1355,7 +1355,7 @@ def passenger_seat(k):
     return {'stock_seat_tris_removed': gone}
 
 # ---- interior colours: charcoal upper dash and door cards, mid-grey lower dash and door inserts, light grey headliner and pillars
-TRIM_CHARCOAL = (66, 68, 73); TRIM_GREY = (120, 123, 130); HEADLINER_GREY = (150, 153, 159); DOOR_CLOTH = (112, 116, 123)
+TRIM_CHARCOAL = (66, 68, 73); TRIM_GREY = (104, 107, 114); HEADLINER_GREY = (150, 153, 159); DOOR_CLOTH = (112, 116, 123)
 DASH_SPLIT_Y = 0.665              # the dash is charcoal above this height (top roll, gauge hood) and grey below (knee panel, glove box)
 
 def grain_texture(rgb, seed, size=256, amount=0.10):
