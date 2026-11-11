@@ -637,7 +637,10 @@ def clear_lamps(k):
 TAIL_V = (-0.60, -0.024)
 TAIL_U = (0.349, 0.618)
 TW, TH, TRED = 1024, 512, 331
-TAIL_HOLE = [(520, 20), (506, 150), (470, 250), (400, 310), (333, 334), (600, 342), (848, 338), (852, 60), (800, 20)]   # px
+def tail_out(pts):
+    """the lamp's rear face runs on further round the corner than its UVs suggest: stretch everything outboard of px 600"""
+    return [(x if x < 600 else 600 + (x - 600) * 1.6, y) for x, y in pts]
+TAIL_HOLE = tail_out([(520, 20), (506, 150), (470, 250), (400, 310), (333, 334), (600, 342), (848, 338), (852, 60), (800, 20)])   # px
 TAIL_DEPTH = 0.004              # how far behind the lens surface the exposed inside sits
 
 def tail_st(uv):
@@ -660,23 +663,23 @@ def tail_inside_images():
     n1 = noise((TH, TW), 6, 1); n2 = noise((TH, TW), (2, 12), 2)
     a = np.array([118.0, 15, 27]) * (0.80 + 0.40 * n1[:, :, None]); hgt = 0.6 * n2                 # dull dark red
     im = Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), 'RGB').convert('RGBA'); d = ImageDraw.Draw(im, 'RGBA')
-    d.polygon([(711, 20), (744, 20), (752, 150), (780, 245), (760, 320), (716, 320)], fill=(168, 20, 38, 255))     # shard left standing
+    d.polygon(tail_out([(711, 20), (744, 20), (752, 150), (780, 245), (760, 320), (716, 320)]), fill=(168, 20, 38, 255))     # shard left standing
     sc = Image.new('RGBA', (TW, TH), (0, 0, 0, 0)); sd = ImageDraw.Draw(sc)                        # white scrape marks
     for cx, cy, sx, sy, cnt in ((585, 175, 42, 75, 700), (735, 200, 12, 70, 160), (640, 318, 60, 10, 140), (830, 250, 12, 50, 60)):
         for _ in range(cnt):
-            x = rng.normal(cx, sx); y = rng.normal(cy, sy); L = rng.uniform(6, 34); an = rng.normal(-1.05, 0.22)
+            x = tail_out([(rng.normal(cx, sx), 0)])[0][0]; y = rng.normal(cy, sy); L = rng.uniform(6, 34); an = rng.normal(-1.05, 0.22)
             sd.line([(x, y), (x + L * np.cos(an), y + L * np.sin(an))], fill=(244, 226, 228, int(rng.uniform(40, 150))), width=int(rng.integers(1, 3)))
     im.alpha_composite(sc.filter(ImageFilter.GaussianBlur(0.6)))
     grid = np.zeros((TH, TW), bool)
     for poly in ([(647, 58), (711, 60), (711, 300), (650, 297)], [(744, 52), (812, 60), (810, 185), (782, 240), (754, 150)]):
-        g = Image.new('L', (TW, TH), 0); ImageDraw.Draw(g).polygon(poly, fill=255); grid |= np.asarray(g) > 0
+        g = Image.new('L', (TW, TH), 0); ImageDraw.Draw(g).polygon(tail_out(poly), fill=255); grid |= np.asarray(g) > 0
     a = np.asarray(im).astype(float)[:, :, :3]
     cell = 7.0; px_ = (xx % cell) / cell - 0.5; py_ = (yy % cell) / cell - 0.5; pil = 1 - 4 * np.maximum(px_ ** 2, py_ ** 2)   # pillow optics
     a[grid] = (np.array([232.0, 232, 236]) * (0.72 + 0.28 * pil[:, :, None]))[grid]; hgt = np.where(grid, 6.0 * pil, hgt)
     edge = Image.fromarray((grid * 255).astype(np.uint8)).filter(ImageFilter.FIND_EDGES); a[np.asarray(edge) > 0] = (60, 8, 14)
     im = Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), 'RGB'); d = ImageDraw.Draw(im)
-    d.polygon([(596, 322), (700, 314), (712, 296), (736, 300), (742, 318), (850, 322), (850, 345), (596, 345)], fill=(10, 5, 6))   # gap at the bottom
-    d.line([(852, 60), (846, 322)], fill=(40, 6, 10), width=4)
+    d.polygon(tail_out([(596, 322), (700, 314), (712, 296), (736, 300), (742, 318), (850, 322), (850, 345), (596, 345)]), fill=(10, 5, 6))   # gap at the bottom
+    d.line(tail_out([(852, 60), (846, 322)]), fill=(40, 6, 10), width=4)
     # the lens edge throws a shadow onto the inside along the top and inboard sides of the hole
     hole = Image.new('L', (TW, TH), 0); ImageDraw.Draw(hole).polygon(TAIL_HOLE, fill=255)
     lit = np.asarray(ImageChops.offset(hole, 9, 12).filter(ImageFilter.GaussianBlur(5))).astype(float) / 255
@@ -694,12 +697,12 @@ def tail_crack_image():
                     ([(470, 250), (430, 240), (396, 262)], 1), ([(690, 342), (684, 392), (694, 432)], 2),
                     ([(684, 392), (640, 410)], 1), ([(760, 340), (772, 420), (742, 512)], 2), ([(772, 420), (820, 450)], 1),
                     ([(600, 342), (560, 372), (500, 384)], 1)):
-        j = [(x + rng.uniform(-2, 2), y + rng.uniform(-2, 2)) for x, y in line]; j[0] = line[0]
+        line = tail_out(line); j = [(x + rng.uniform(-2, 2), y + rng.uniform(-2, 2)) for x, y in line]; j[0] = line[0]
         d.line(j, fill=dark, width=w, joint='curve')
         if w > 1: d.line([(x + 1, y - w) for x, y in j], fill=lightc, width=1)
     edge = TAIL_HOLE[:5]                                                                             # the curved break
     d.line([(x - 2, y - 1) for x, y in edge], fill=lightc, width=3, joint='curve'); d.line([(x - 5, y - 2) for x, y in edge], fill=dark, width=2, joint='curve')
-    d.line([(520, 17), (800, 17)], fill=lightc, width=2)
+    d.line(tail_out([(520, 17), (800, 17)]), fill=lightc, width=2)
     return im
 
 def subdivide_cut(V, F, st_of, inside, keep_inside=False, levels=4):
