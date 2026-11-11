@@ -1162,7 +1162,7 @@ def bucket_seat(k):
 # ---- manual shifter with the cloth bag as its boot
 SHIFT_XZ = (-0.02, 0.215); SHIFT_Y = 0.333      # where the lever comes out of the console; height of the console there
 
-def lathe(prof, v0, v1, seg=18, urep=1.0, tilt=0.0, planar=None):
+def lathe(prof, v0, v1, seg=18, urep=1.0, tilt=0.0, planar=None, u0=0.0):
     """rings of radius r at height h around the shifter axis; r may be a function of the angle.
     planar=(u, v, scale): map the texture straight down onto the part (image up = front of the car) instead of round it"""
     th = np.linspace(0, 2 * np.pi, seg + 1); P = []; R = []
@@ -1171,7 +1171,7 @@ def lathe(prof, v0, v1, seg=18, urep=1.0, tilt=0.0, planar=None):
         P.append(np.c_[SHIFT_XZ[0] + rr * np.cos(th), np.full(len(th), h), SHIFT_XZ[1] + rr * np.sin(th) - (h - SHIFT_Y) * np.tan(tilt)])
     P = np.array(P); R = np.array(R); hs = np.array([h for _, h in prof]); f = (hs - hs[0]) / (hs[-1] - hs[0])
     if planar: UV = np.stack([planar[0] - R * np.cos(th) * planar[2], planar[1] - R * np.sin(th) * planar[2]], axis=-1)
-    else: UV = np.stack([np.broadcast_to((th / (2 * np.pi) * urep)[None], P.shape[:2]), np.broadcast_to((v0 + (v1 - v0) * f)[:, None], P.shape[:2])], axis=-1)
+    else: UV = np.stack([np.broadcast_to((u0 + th / (2 * np.pi) * urep)[None], P.shape[:2]), np.broadcast_to((v0 + (v1 - v0) * f)[:, None], P.shape[:2])], axis=-1)
     return surf(P, UV, 'out')
 
 KNOB_BASE, KNOB_SEAM, KNOB_TOP = 0.158, 0.236, 0.2500       # heights above the console: bottom of the knob, its stitched ring, its crown
@@ -1199,12 +1199,14 @@ def shifter_image(size=1024, seed=51):
     d.line([(sx, sy), (sx, 300)], fill=(12, 12, 13), width=4)                                                    # seam down its length
     for y0 in range(sy + 8, 296, 9):
         d.line([(sx - 20, y0 - 3), (sx, y0)], fill=thread, width=2); d.line([(sx + 20, y0 + 1), (sx, y0 + 4)], fill=thread, width=2)
-    bx, by, bw, bh = S // 4 - 150, 176, 300, 46                                                                  # badge, facing the driver
-    d.rounded_rectangle((bx - 3, by - 3, bx + bw + 3, by + bh + 3), radius=8, fill=(150, 152, 156)); d.rounded_rectangle((bx, by, bx + bw, by + bh), radius=6, fill=(10, 10, 11))
-    f1 = font(['arialbd.ttf'], 15); d.text((bx + bw // 2, by + 3), 'TOYOTA MOTOR SPORTS', font=f1, fill=(214, 30, 36), anchor='mt')
+    bw, bh = 600, 92; bd = Image.new('RGB', (bw, bh), (150, 152, 156)); e = ImageDraw.Draw(bd)                  # badge, drawn lying down
+    e.rounded_rectangle((6, 6, bw - 7, bh - 7), radius=12, fill=(10, 10, 11))
+    e.text((bw // 2, 8), 'TOYOTA MOTOR SPORTS', font=font(['arialbd.ttf'], 30), fill=(214, 30, 36), anchor='mt')
     for i, col in enumerate([(236, 236, 238), (236, 236, 238), (214, 30, 36)]):
-        x1 = bx + 12 + i * 26; d.polygon([(x1 + 12, by + 21), (x1 + 34, by + 21), (x1 + 22, by + bh - 4), (x1, by + bh - 4)], fill=col)
-    f2 = font(['arialbi.ttf', 'arialbd.ttf'], 27); d.text((bx + 104, by + 18), 'TRD', font=f2, fill=(240, 240, 242)); d.text((bx + 105, by + 18), 'TRD', font=f2, fill=(240, 240, 242))
+        x1 = 24 + i * 52; e.polygon([(x1 + 24, 42), (x1 + 68, 42), (x1 + 44, bh - 10), (x1, bh - 10)], fill=col)
+    f2 = font(['arialbi.ttf', 'arialbd.ttf'], 54); e.text((208, 34), 'TRD', font=f2, fill=(240, 240, 242)); e.text((210, 34), 'TRD', font=f2, fill=(240, 240, 242))
+    # it sits upright on the driver's side of the knob, low down, reading from the bottom up
+    im.paste(bd.rotate(90, expand=True).resize((104, 140), Image.LANCZOS), (S // 4 - 52, 146))
     im = im.resize((S, S))                                                                                       # (keeps everything above in one pass)
     # crown: the shift pattern pressed into the leather, 160 px square at (0, 310)
     d = ImageDraw.Draw(im); cx, cy = 80, 390; emb = (64, 64, 68); f3 = font(['arialbd.ttf'], 26)
@@ -1228,7 +1230,7 @@ def shifter(k):
     crown = [(KNOB_R, Sm), (0.0244, Sm + 0.0045), (0.0222, Sm + 0.0085), (0.0180, Sm + 0.0115), (0.0120, Sm + 0.0132), (0.0060, Sm + 0.0139), (0.0004, T)]
     parts = [two_sided(*lathe([(bag(t_), Y - 0.004 + 0.082 * t_) for t_ in ts], 0.99, 0.51, seg=28, urep=2.0, tilt=tilt * 0.5)),   # seen from inside too, through the open hem
              lathe([(0.009, Y + 0.045), (0.009, B + 0.004)], 0.475, 0.495, seg=10, tilt=tilt),
-             lathe(side, 300 / 1024, 16 / 1024, seg=24, urep=-1.0, tilt=tilt),                                   # urep -1: the badge reads the right way round from outside
+             lathe(side, 300 / 1024, 16 / 1024, seg=24, urep=-1.0, u0=0.25, tilt=tilt),                          # badge towards the driver (+x), seam to the rear; urep -1 so it is not mirrored
              lathe(crown, 0, 0, seg=24, tilt=tilt, planar=(80 / 1024, 390 / 1024, 72 / 1024 / KNOB_R))]
     k.set_texture('gh_shifter.png', png_bytes(shifter_image()))
     V, F = join(*parts)
