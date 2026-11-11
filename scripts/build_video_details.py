@@ -637,10 +637,11 @@ def clear_lamps(k):
 TAIL_V = (-0.60, -0.024)
 TAIL_U = (0.349, 0.618)
 TW, TH, TRED = 1024, 512, 331
-def tail_out(pts):
-    """the lamp's rear face runs on further round the corner than its UVs suggest: stretch everything outboard of px 600"""
-    return [(x if x < 600 else 600 + (x - 600) * 1.6, y) for x, y in pts]
-TAIL_HOLE = tail_out([(520, 20), (506, 150), (470, 250), (400, 310), (333, 334), (600, 342), (848, 338), (852, 60), (800, 20)])   # px
+# The lamp is a smooth red outer sheet over a clear plastic block moulded with a mosaic of small optics. The red sheet
+# is cracked; two pieces of it are missing (joined by a sliver along the top edge), and there the clear mosaic shows white.
+TAIL_HOLE = [(523, 4), (835, 4), (835, 235), (812, 233), (738, 55), (734, 22), (687, 25), (693, 152), (725, 309), (713, 340),
+             (671, 331), (642, 212), (642, 55), (604, 40), (604, 15), (523, 10)]                                         # px
+TAIL_CRACK = [(507, 0), (517, 127), (501, 249), (431, 323), (341, 331), (238, 331), (181, 365), (59, 476)]   # across the red sheet, into the amber
 TAIL_DEPTH = 0.004              # how far behind the lens surface the exposed inside sits
 
 def tail_st(uv):
@@ -657,52 +658,42 @@ def tail_mask(grow=0):
     return inside
 
 def tail_inside_images():
-    """what shows through the hole: the scuffed inner red lens, two bare patches of white reflector optics, a dark gap
-    along the bottom. Returns (diffuse RGB, normal map RGB)."""
-    rng = np.random.default_rng(83); yy, xx = np.mgrid[0:TH, 0:TW].astype(float)
-    n1 = noise((TH, TW), 6, 1); n2 = noise((TH, TW), (2, 12), 2)
-    a = np.array([118.0, 15, 27]) * (0.80 + 0.40 * n1[:, :, None]); hgt = 0.6 * n2                 # dull dark red
-    im = Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), 'RGB').convert('RGBA'); d = ImageDraw.Draw(im, 'RGBA')
-    d.polygon(tail_out([(711, 20), (744, 20), (752, 150), (780, 245), (760, 320), (716, 320)]), fill=(168, 20, 38, 255))     # shard left standing
-    sc = Image.new('RGBA', (TW, TH), (0, 0, 0, 0)); sd = ImageDraw.Draw(sc)                        # white scrape marks
-    for cx, cy, sx, sy, cnt in ((585, 175, 42, 75, 700), (735, 200, 12, 70, 160), (640, 318, 60, 10, 140), (830, 250, 12, 50, 60)):
-        for _ in range(cnt):
-            x = tail_out([(rng.normal(cx, sx), 0)])[0][0]; y = rng.normal(cy, sy); L = rng.uniform(6, 34); an = rng.normal(-1.05, 0.22)
-            sd.line([(x, y), (x + L * np.cos(an), y + L * np.sin(an))], fill=(244, 226, 228, int(rng.uniform(40, 150))), width=int(rng.integers(1, 3)))
-    im.alpha_composite(sc.filter(ImageFilter.GaussianBlur(0.6)))
-    grid = np.zeros((TH, TW), bool)
-    for poly in ([(647, 58), (711, 60), (711, 300), (650, 297)], [(744, 52), (812, 60), (810, 185), (782, 240), (754, 150)]):
-        g = Image.new('L', (TW, TH), 0); ImageDraw.Draw(g).polygon(tail_out(poly), fill=255); grid |= np.asarray(g) > 0
-    a = np.asarray(im).astype(float)[:, :, :3]
-    cell = 7.0; px_ = (xx % cell) / cell - 0.5; py_ = (yy % cell) / cell - 0.5; pil = 1 - 4 * np.maximum(px_ ** 2, py_ ** 2)   # pillow optics
-    a[grid] = (np.array([232.0, 232, 236]) * (0.72 + 0.28 * pil[:, :, None]))[grid]; hgt = np.where(grid, 6.0 * pil, hgt)
-    edge = Image.fromarray((grid * 255).astype(np.uint8)).filter(ImageFilter.FIND_EDGES); a[np.asarray(edge) > 0] = (60, 8, 14)
+    """what shows through the holes: the clear mosaic plastic behind the red sheet. Returns (diffuse RGB, normal map RGB)."""
+    yy, xx = np.mgrid[0:TH, 0:TW].astype(float); cell = 6.0
+    px_ = (xx % cell) / cell - 0.5; py_ = (yy % cell) / cell - 0.5; pil = 1 - 4 * np.maximum(px_ ** 2, py_ ** 2)      # pillow optics
+    a = np.array([226.0, 222, 224]) * (0.62 + 0.38 * pil[:, :, None]) * (0.92 + 0.16 * noise((TH, TW), 20, 3)[:, :, None])
     im = Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), 'RGB'); d = ImageDraw.Draw(im)
-    d.polygon(tail_out([(596, 322), (700, 314), (712, 296), (736, 300), (742, 318), (850, 322), (850, 345), (596, 345)]), fill=(10, 5, 6))   # gap at the bottom
-    d.line(tail_out([(852, 60), (846, 322)]), fill=(40, 6, 10), width=4)
-    # the lens edge throws a shadow onto the inside along the top and inboard sides of the hole
+    d.polygon([(650, 318), (668, 300), (700, 296), (722, 306), (732, 345), (650, 345)], fill=(10, 5, 6))             # dark gap at the foot of the hole
+    # the edge of the red sheet throws a shadow onto the plastic along the top and inboard sides of each hole
     hole = Image.new('L', (TW, TH), 0); ImageDraw.Draw(hole).polygon(TAIL_HOLE, fill=255)
-    lit = np.asarray(ImageChops.offset(hole, 9, 12).filter(ImageFilter.GaussianBlur(5))).astype(float) / 255
-    a = np.asarray(im).astype(float) * (0.38 + 0.62 * lit[:, :, None])
-    gy, gx = np.gradient(gaussian_filter(hgt, 0.7)); nz = np.ones_like(gx); l = np.sqrt(gx ** 2 + gy ** 2 + 1)
-    nm = np.dstack([-gx / l, gy / l, nz / l]) * 0.5 + 0.5
+    lit = np.asarray(ImageChops.offset(hole, 5, 7).filter(ImageFilter.GaussianBlur(3))).astype(float) / 255
+    a = np.asarray(im).astype(float) * (0.40 + 0.60 * lit[:, :, None])
+    gy, gx = np.gradient(gaussian_filter(5.0 * pil, 0.6)); l = np.sqrt(gx ** 2 + gy ** 2 + 1)
+    nm = np.dstack([-gx / l, gy / l, 1 / l]) * 0.5 + 0.5
     return Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), 'RGB'), Image.fromarray((nm * 255).astype(np.uint8), 'RGB')
 
 def tail_crack_image():
-    """transparent except for the cracks that run on from the break, and the bright broken edge of the lens"""
+    """lies on the red sheet and the amber lens; transparent except for the crack, the white scrape marks on the pieces
+    of red sheet around the holes, and the bright broken edges"""
     rng = np.random.default_rng(84); im = Image.new('RGBA', (TW, TH), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
     dark = (40, 5, 9, 255); lightc = (240, 205, 200, 255)
-    for line, w in (([(333, 334), (250, 336), (170, 338), (110, 372), (30, 420), (0, 432)], 3),      # along the joint, then down across the amber
-                    ([(170, 338), (120, 330), (60, 334)], 1), ([(506, 150), (486, 120), (476, 60), (484, 0)], 2),
-                    ([(470, 250), (430, 240), (396, 262)], 1), ([(690, 342), (684, 392), (694, 432)], 2),
-                    ([(684, 392), (640, 410)], 1), ([(760, 340), (772, 420), (742, 512)], 2), ([(772, 420), (820, 450)], 1),
-                    ([(600, 342), (560, 372), (500, 384)], 1)):
-        line = tail_out(line); j = [(x + rng.uniform(-2, 2), y + rng.uniform(-2, 2)) for x, y in line]; j[0] = line[0]
+    hole = np.asarray(Image.new('L', (TW, TH), 0)).copy(); hm = Image.new('L', (TW, TH), 0); ImageDraw.Draw(hm).polygon(TAIL_HOLE, fill=255)
+    hole = np.asarray(hm.filter(ImageFilter.MaxFilter(5))) > 0
+    # scrapes: between the crack and the first hole, on the shard between the holes, and smeared along the joint below
+    for cx, cy, sx, sy, cnt, an0 in ((585, 185, 30, 62, 520, -0.45), (712, 190, 9, 62, 150, -1.2), (640, 345, 50, 12, 220, -0.2), (800, 290, 14, 22, 50, -1.0)):
+        for _ in range(cnt):
+            x = rng.normal(cx, sx); y = rng.normal(cy, sy); L = rng.uniform(5, 26); an = rng.normal(an0, 0.2)
+            q = (x + L * np.cos(an), y + L * np.sin(an)); g = rng.uniform(0.35, 1.0)
+            if not (0 <= x < TW and 0 <= y < TH and 0 <= q[0] < TW and 0 <= q[1] < TH) or hole[int(y), int(x)] or hole[int(q[1]), int(q[0])]: continue
+            if np.interp(y, [p_[1] for p_ in TAIL_CRACK[:4]], [p_[0] for p_ in TAIL_CRACK[:4]]) > x and y < 300: continue   # inboard of the crack
+            d.line([(x, y), q], fill=(int(150 + 95 * g), int(40 + 190 * g), int(55 + 180 * g), 255), width=int(rng.integers(1, 3)))
+    for line, w in ((TAIL_CRACK, 3), ([(238, 331), (170, 327), (100, 333)], 1), ([(501, 249), (462, 240), (430, 258)], 1),
+                    ([(690, 342), (684, 392), (694, 432)], 2), ([(684, 392), (640, 410)], 1), ([(760, 340), (772, 420), (742, 512)], 2),
+                    ([(772, 420), (820, 450)], 1), ([(725, 309), (760, 318), (800, 300), (850, 270)], 2)):
+        j = [(x + rng.uniform(-2, 2), y + rng.uniform(-2, 2)) for x, y in line]; j[0] = line[0]
         d.line(j, fill=dark, width=w, joint='curve')
         if w > 1: d.line([(x + 1, y - w) for x, y in j], fill=lightc, width=1)
-    edge = TAIL_HOLE[:5]                                                                             # the curved break
-    d.line([(x - 2, y - 1) for x, y in edge], fill=lightc, width=3, joint='curve'); d.line([(x - 5, y - 2) for x, y in edge], fill=dark, width=2, joint='curve')
-    d.line(tail_out([(520, 17), (800, 17)]), fill=lightc, width=2)
+    d.line(TAIL_HOLE + TAIL_HOLE[:1], fill=lightc, width=2, joint='curve')                           # broken edge of the red sheet
     return im
 
 def subdivide_cut(V, F, st_of, inside, keep_inside=False, levels=4):
