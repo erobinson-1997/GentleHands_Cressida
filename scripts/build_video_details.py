@@ -1356,7 +1356,7 @@ def passenger_seat(k):
 
 # ---- interior colours: charcoal upper dash and door cards, mid-grey lower dash and door inserts, light grey headliner and pillars
 TRIM_CHARCOAL = (66, 68, 73); TRIM_GREY = (104, 107, 114); HEADLINER_GREY = (150, 153, 159); DOOR_CLOTH = (112, 116, 123)
-DASH_SPLIT_Y = 0.665              # the dash is charcoal above this height (top roll, gauge hood) and grey below (knee panel, glove box)
+HANDLE_RGB = (38, 39, 42)         # inside door handles: black plastic, not chrome
 
 def grain_texture(rgb, seed, size=256, amount=0.10):
     a = np.empty((size, size, 3)); a[:] = rgb; a *= (1 - amount + 2 * amount * noise((size, size), 0.8, seed))[..., None]
@@ -1374,11 +1374,22 @@ def interior_colors(k):
     charcoal = retone(k, 'dashleather', 'gh_trim_charcoal', TRIM_CHARCOAL, 91); grey = retone(k, 'dashleather', 'gh_trim_grey', TRIM_GREY, 92)
     n, parent, M = k.find('dashboard'); w = world_pos(n, M); nc, lab = components(w, n.F)
     wide = np.array([np.ptp(w[lab == c][:, 0]) > 1.0 for c in range(nc)])                 # the dash itself spans the car; door cards and trims do not
-    c = w[n.F].mean(1); lower = wide[lab[n.F[:, 0]]] & (c[:, 1] < DASH_SPLIT_Y)
+    # the dash is built from separate panels (they do not share vertices); whole panels change colour, so the boundary follows their edges
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    e = np.r_[n.F[:, [0, 1]], n.F[:, [1, 2]]]; ni, isl = connected_components(coo_matrix((np.ones(len(e)), (e[:, 0], e[:, 1])), shape=(len(w),) * 2), directed=False)
+    grey_isl = np.zeros(ni, bool)
+    for i in np.unique(isl[n.F[wide[lab[n.F[:, 0]]]][:, 0]]):
+        p = w[isl == i]; lo, hi = p.min(0), p.max(0)
+        glove_box = hi[0] < -0.13 and hi[1] < 0.70 and lo[2] > 0.40; knee_panel = lo[0] > 0.12 and hi[1] < 0.63 and lo[2] > 0.44
+        grey_isl[i] = glove_box or knee_panel
+    lower = grey_isl[isl[n.F[:, 0]]]
     Vt, Ft = split_mesh(n, lower); n.mat = charcoal
     m2 = Node(2, 'dashboard_lower'); m2.V, m2.F, m2.mat, m2.flags, m2.layer, m2.lod = Vt, Ft, grey, n.flags, n.layer, n.lod; update_bounds(m2); parent.children.append(m2)
     k.find('carpetroof')[0].mat = retone(k, 'carpet', 'gh_headliner', HEADLINER_GREY, 93, ambient=0.40, diffuse=0.36)
     k.find('carts.001')[0].mat = retone(k, 'seatleather2', 'gh_door_cloth', DOOR_CLOTH, 94)
+    k.set_texture('gh_handle_plastic.png', grain_texture(HANDLE_RGB, 95, amount=0.06))
+    k.find('chrome1')[0].mat = k.add_material(simple_material('gh_handle_plastic', 'gh_handle_plastic.png', 0.40, 0.45, 0.20, 25.0))
     return {'lower_dash_tris': int(lower.sum())}
 
 def build(src, out):
