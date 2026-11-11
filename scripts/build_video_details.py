@@ -791,26 +791,32 @@ def paint_damage_image():
         return (n - n.mean()) / n.std()
     grain = 0.85 + 0.30 * noise((PD_H, PD_W), 3, 21)
     primer = (188, 190, 196); metal = (74, 76, 82); lid = xx < 492
-    # trunk lid: the deepest parts of the scrape...
-    core = Image.new('L', (PD_W, PD_H), 0); cd = ImageDraw.Draw(core)
-    cd.line([(264, 182), (350, 178), (444, 182)], fill=255, width=30, joint='curve')
-    cd.line([(161, 299), (186, 322), (216, 340), (271, 357), (354, 361)], fill=255, width=34, joint='curve')
-    for x_, y_, r_ in ((264, 182, 15), (444, 182, 15), (161, 299, 17), (354, 361, 17)): cd.ellipse((x_ - r_, y_ - r_, x_ + r_, y_ + r_), fill=255)
-    cd.rounded_rectangle((402, 360, 486, 390), radius=14, fill=255)
-    core = np.asarray(core.filter(ImageFilter.GaussianBlur(6))).astype(float) / 255
-    core = np.clip(core * 1.5 * (0.35 + 1.0 * noise((PD_H, PD_W), (2.5, 12), 31)) - 0.12, 0, 1)                             # worn unevenly, along the stroke
-    # ...and the paint dragged off beside them: each mark trails away to the left, fading, in fine streaks
-    L = 260; kern = np.exp(-np.arange(L) / 48.0); kern /= kern.sum(); wide = gaussian_filter(core, (8, 0))
-    smear = np.stack([np.convolve(row, kern, mode='full')[L - 1:] for row in wide]) * 2.2 * np.clip(xx / 90, 0, 1)            # one-sided: pulls each row leftwards
-    fine = np.clip(0.70 + 0.40 * streaks(0, 32, (1.2, 34)), 0, 1)
-    haze = np.exp(-(((xx - 330) / 190) ** 2 + ((yy - 275) / 125) ** 2) ** 2)
-    over((150, 154, 162), 0.22 * haze * grain * lid)
-    over((182, 185, 192), 0.80 * np.clip(smear, 0, 1) ** 0.8 * fine * lid)
-    over((204, 204, 208), 0.92 * core * lid)
-    over((150, 112, 92), 0.40 * core * np.exp(-(((xx - 400) / 60) ** 2 + ((yy - 180) / 22) ** 2)) * lid)   # a little rust in the top bar
-    # a few fine scratches down the lid's outer edge, below the gouges
-    edge = np.exp(-(((xx - 468) / 20) ** 2)) * np.clip((yy - 385) / 30, 0, 1) * np.clip((560 - yy) / 90, 0, 1)
-    over((186, 188, 194), 0.55 * edge * np.clip(0.9 * streaks(78, 33, (0.8, 16)), 0, 1) * lid)
+    # trunk lid, traced from the owner's close-up (1 photo px = 1.54 px here): a broad pale lobe on top with rust in it; from
+    # its inboard end a band hooks down and back out along the bottom (a 'C' open towards the lid's edge) ending in a bright
+    # spot; a darker rubbed patch inside the C with the scored line across it; a pale streak fading down the lid's edge.
+    def soft(draw, blur):
+        im_ = Image.new('L', (PD_W, PD_H), 0); draw(ImageDraw.Draw(im_))
+        return np.asarray(im_.filter(ImageFilter.GaussianBlur(blur))).astype(float) / 255
+    hstr = np.clip(0.62 + 0.42 * streaks(0, 32, (1.3, 30)), 0, 1)                                   # dragged sideways
+    blot = np.clip(0.55 + 0.9 * noise((PD_H, PD_W), 14, 34), 0, 1)
+    hook = [(215, 180), (190, 218), (184, 257), (202, 292), (264, 318), (341, 334), (418, 345), (446, 349)]
+    band = soft(lambda d: [d.line(hook[i:i + 2], fill=255, width=w) for i, w in enumerate((40, 44, 48, 52, 54, 54, 50))]
+                + [d.ellipse((x_ - 24, y_ - 24, x_ + 24, y_ + 24), fill=255) for x_, y_ in hook], 11)
+    lobe = soft(lambda d: d.ellipse((206, 136, 476, 196), fill=255), 12)
+    spot = soft(lambda d: d.ellipse((414, 322, 470, 374), fill=255), 9)
+    tail = soft(lambda d: d.line([(457, 357), (467, 418), (472, 500)], fill=255, width=36, joint='curve'), 10) * np.clip((520 - yy) / 150, 0, 1)
+    inner = soft(lambda d: d.ellipse((236, 196, 480, 300), fill=255), 16)
+    L = 120; kern = np.exp(-np.arange(L) / 20.0); kern /= kern.sum()
+    marks = np.clip(np.maximum(np.maximum(band, lobe), spot) * 1.25, 0, 1)
+    smear = np.stack([np.convolve(row, kern, mode='full')[L - 1:] for row in marks]) * np.clip(xx / 90, 0, 1)   # trails off inboard
+    over((40, 41, 47), 0.42 * inner * lid)
+    over((170, 174, 182), 0.36 * np.clip(smear * 1.3, 0, 1) * hstr * lid)
+    over((196, 199, 205), 0.90 * marks * (0.55 + 0.45 * hstr) * blot * lid)
+    over((226, 228, 232), 0.75 * spot * lid)
+    over((158, 120, 104), 0.50 * soft(lambda d: d.ellipse((330, 144, 452, 180), fill=255), 9) * blot * lid)       # rust in the top lobe
+    over((184, 192, 208), 0.62 * tail * (0.45 + 0.55 * np.clip(0.5 + 0.6 * streaks(80, 33, (1.2, 22)), 0, 1)) * lid)
+    over((62, 26, 24), 0.75 * soft(lambda d: d.line([(244, 249), (480, 249)], fill=255, width=4), 1.2) * lid)       # scored line
+    over((30, 30, 34), 0.55 * soft(lambda d: d.line([(300, 262), (480, 262)], fill=255, width=3), 1.2) * lid)
     # body corner: scraped nearly black, pale brush marks mostly low down
     m = Image.new('L', (PD_W, PD_H), 0)
     ImageDraw.Draw(m).polygon([(505, 330), (640, 215), (800, 290), (810, 520), (770, 655), (505, 665)], fill=255)
