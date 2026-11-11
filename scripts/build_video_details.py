@@ -815,8 +815,7 @@ def paint_damage_image():
     over((226, 228, 232), 0.75 * spot * lid)
     over((158, 120, 104), 0.50 * soft(lambda d: d.ellipse((330, 144, 452, 180), fill=255), 9) * blot * lid)       # rust in the top lobe
     over((184, 192, 208), 0.62 * tail * (0.45 + 0.55 * np.clip(0.5 + 0.6 * streaks(80, 33, (1.2, 22)), 0, 1)) * lid)
-    over(STRIPE_RGB, 0.85 * soft(lambda d: d.line([(236, 249), (492, 249)], fill=255, width=14), 1.0) * lid)     # what is left of the pinstripe
-    over(STRIPE_RGB, 0.80 * soft(lambda d: d.line([(290, 281), (492, 281)], fill=255, width=8), 1.0) * lid)
+    # (what is left of the pinstripe here is the PINSTRIPE mesh itself: on the trunk lid it lies on top of this decal)
     # body corner: scraped nearly black, pale brush marks mostly low down
     m = Image.new('L', (PD_W, PD_H), 0)
     ImageDraw.Draw(m).polygon([(505, 330), (640, 215), (800, 290), (810, 520), (770, 655), (505, 665)], fill=255)
@@ -846,13 +845,52 @@ def paint_damage(k):
     return {'tris': len(F)}
 
 # ------------------------------------------------------------------ 15. double pinstripe along the beltline and across the trunk
-# Height of the stripe's centre line along the car. The window sills are one straight line (y = 0.783 - 0.0222 z); the stripe
-# runs parallel to it, 5.5 cm lower, dead straight from the front fender to the back of the rear door, then levels off (over
-# a gentle radius) at the height it crosses the trunk.
-STRIPE_SILL = (0.783, -0.0222); STRIPE_DROP = 0.055; STRIPE_REAR_Y = 0.755; STRIPE_FRONT_Z = 1.62
+# Height of the stripe's centre line along the car: three straight runs joined over gentle radii. Along the doors it runs
+# parallel to the window sills (one straight line, y = 0.783 - 0.0222 z), 5.5 cm lower; behind the rear door it levels off at
+# the height it crosses the trunk; ahead of the front door it follows the fender's shoulder down towards the headlight.
+STRIPE_SILL = (0.783, -0.0222); STRIPE_DROP = 0.055; STRIPE_REAR_Y = 0.755; STRIPE_FRONT_Z = 1.70
+STRIPE_FENDER = (0.900, 0.700, -0.0893)                    # z, y of a point on the fender run, and its slope
+def _smin(a, b, r=0.004): return 0.5 * (a + b - np.sqrt((a - b) ** 2 + r * r))
 def stripe_y(z):
-    a = STRIPE_SILL[0] - STRIPE_DROP + STRIPE_SILL[1] * np.asarray(z, float); b = STRIPE_REAR_Y
-    return 0.5 * (a + b - np.sqrt((a - b) ** 2 + 0.004 ** 2))            # smooth minimum of the two straight runs
+    z = np.asarray(z, float)
+    y = _smin(STRIPE_SILL[0] - STRIPE_DROP + STRIPE_SILL[1] * z, STRIPE_REAR_Y)
+    return _smin(y, STRIPE_FENDER[1] + STRIPE_FENDER[2] * (z - STRIPE_FENDER[0]))
+
+# The stripe is paint: on the crashed right rear corner it has to follow the metal, not the height above the ground. So it is
+# laid out on the panels as they were BEFORE the crash. crash_field() is a copy of the displacement field stage 1 applied
+# (build_rear_damage.py: total(), trunk_extra()); uncrashed() inverts it numerically.
+def _ck(w, C, R):
+    r2 = (((w - np.array(C)) / np.array(R)) ** 2).sum(1); return np.where(r2 < 1, (1 - r2) ** 2, 0.0)
+def crash_field(w, trunk=False):
+    k1 = _ck(w, (-0.80, 0.60, -2.47), (0.55, 0.52, 0.78)); k2 = _ck(w, (-0.76, 0.34, -2.33), (0.40, 0.30, 0.50))
+    s_ = w @ np.array([0.86, 0.15, -0.48]); q = np.array([0.35, 0.45, 0.82]); q /= np.linalg.norm(q)
+    wr1 = 0.03 * np.sin(26 * s_ + 2.0 * np.sin(9 * w[:, 1] + 3 * w[:, 0])); wr2 = 0.045 * np.sin(34 * s_ + 3.0 * np.sin(13 * w[:, 0] + 7 * w[:, 1]))
+    d = 0.20 * np.array([0.42, 0.0, 0.91])[None] * (k1 * (0.65 + 0.35 * np.sin(17 * w[:, 1] + 13 * w[:, 0])))[:, None]
+    d = d + 0.13 * np.array([0.30, 0.35, 0.89])[None] * (k2 * (0.6 + 0.4 * np.sin(23 * w[:, 0] + 19 * w[:, 1])))[:, None]
+    d = d + q[None] * (wr1 * k1 + wr2 * k2)[:, None]
+    pv = np.array([-0.30, 0.60, -2.45]); e = w - pv; c, s1 = np.cos(np.radians(6.0)), np.sin(np.radians(6.0))    # lamp area: rigid tilt
+    x = e[:, 0] * c - e[:, 1] * s1; y = e[:, 0] * s1 + e[:, 1] * c
+    tl = pv + np.c_[x * c + e[:, 2] * s1, y, -x * s1 + e[:, 2] * c] + np.array([0.0, -0.004, 0.0])
+    lo = np.array([-0.82, 0.46, -2.50]); hi = np.array([-0.28, 0.71, -2.20])
+    wl = (1 - ss(0.02, 0.22, np.linalg.norm(np.maximum(np.maximum(lo - w, 0), np.maximum(w - hi, 0)), axis=1)))[:, None]
+    w = w + wl * (tl - w) + (1 - wl) * d
+    if trunk:
+        k = _ck(w, (-0.66, 0.82, -2.40), (0.40, 0.28, 0.60)); up = ss(0.60, 0.80, w[:, 1])
+        wr = 0.02 * np.sin(31 * (w[:, 0] * 0.8 + w[:, 2] * 0.6) + 2 * np.sin(11 * w[:, 0]))
+        d = np.c_[0.045 * np.ones(len(w)), 0.075 * up, 0.030 * np.ones(len(w))] * (k * (0.7 + 0.3 * np.sin(15 * w[:, 0] + 9 * w[:, 2])))[:, None]
+        d[:, 1] += wr * k * up; w = w + d
+    return w
+
+def uncrashed(w, trunk=False):
+    """where each point of the crashed body was before the crash (Newton iteration on crash_field)"""
+    p = np.array(w, float); m = p[:, 2] < -1.0; q = p[m].copy(); tgt = p[m]; h = 1e-4
+    for _ in range(30):
+        r = crash_field(q, trunk) - tgt
+        J = np.stack([(crash_field(q + e * h, trunk) - crash_field(q - e * h, trunk)) / (2 * h) for e in np.eye(3)], axis=2)
+        st = np.linalg.solve(J + 1e-6 * np.eye(3)[None], r[:, :, None])[:, :, 0]
+        ln = np.linalg.norm(st, axis=1, keepdims=True); q -= st * np.minimum(1.0, 0.04 / np.maximum(ln, 1e-12))
+    p[m] = q
+    return p
 STRIPE_BANDS = [(0.0017, 0.0052), (-0.0055, -0.0035)]      # upper (3.5 mm) and lower (2 mm) line, relative to the centre line
 STRIPE_RGB = (56, 24, 24)
 
@@ -881,16 +919,19 @@ def pinstripe(k):
     for name in ('f_fenders', 'lf_door', 'rf_door', 'rear_doors', 'r_fenders', 'trunk'):
         n, _, M = k.find(name); w = world_pos(n, M); nr = unit(n.V[:, 3:6] @ M[:3, :3])
         V = np.zeros((len(w), 11)); V[:, :3] = w; V[:, 3:6] = nr; V[:, 6:8] = 0.5; V[:, 8:11] = [0, 0, 1]
-        f = w[:, 1] - stripe_y(w[:, 2])
-        fn = nr[n.F].mean(1); c = w[n.F].mean(1)
-        side = (np.abs(c[:, 0]) > 0.70) & (fn[:, 0] * np.sign(c[:, 0]) > (0.10 if name == 'f_fenders' else 0.35)) & (c[:, 2] < STRIPE_FRONT_Z + 0.03)   # outer skin of the flanks (the stripe climbs onto the fender's shoulder at the front)
+        p0 = uncrashed(w, name == 'trunk')                               # the panel before the crash: the stripe is laid out there
+        f = p0[:, 1] - stripe_y(p0[:, 2])
+        tri = p0[n.F]; fn = unit(np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])); c = tri.mean(1)
+        fn *= np.where((fn * nr[n.F].mean(1)).sum(1) < 0, -1.0, 1.0)[:, None]
+        side = (np.abs(c[:, 0]) > 0.70) & (fn[:, 0] * np.sign(c[:, 0]) > 0.35) & (c[:, 2] < STRIPE_FRONT_Z + 0.03)    # outer skin of the flanks
         back = (c[:, 2] < -2.30) & (fn[:, 2] < -0.35)                                                             # rear face of trunk and corners
-        F = n.F[(side | back) & (np.abs(fn[:, 1]) < (0.985 if name == 'f_fenders' else 0.85))]
+        F = n.F[(side | back) & (np.abs(fn[:, 1]) < 0.85)]
         for lo, hi in STRIPE_BANDS:
             v_, f_ = clip_band(V, F, f, lo, hi)
-            if len(v_): Vs.append(v_); Fs.append(f_ + off); off += len(v_)
+            if len(v_):
+                v_[:, 3:6] = unit(v_[:, 3:6]); v_[:, :3] += v_[:, 3:6] * (0.0022 if name == 'trunk' else 0.0008)   # trunk: above the paint-damage decal, so the stripe still shows across the scrape
+                Vs.append(v_); Fs.append(f_ + off); off += len(v_)
     V = np.vstack(Vs); F = np.vstack(Fs)
-    V[:, 3:6] = unit(V[:, 3:6]); V[:, :3] += V[:, 3:6] * 0.0008
     keep = (V[F][:, :, 2] <= STRIPE_FRONT_Z).all(1); F = F[keep]
     k.add_mesh('PINSTRIPE', V, fix_winding(V, F), mid, shadows=0)
     return {'tris': len(F)}
