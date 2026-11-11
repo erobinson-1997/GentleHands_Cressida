@@ -387,7 +387,7 @@ def door_numbers(k):
     from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
     k.set_texture('gh_number_panel.png', png_bytes(number_panel_image(RACE_NUMBER)))
     mid = k.add_material(simple_material('gh_number_panel', 'gh_number_panel.png', 0.42, 0.50, 0.12, 20.0))
-    zc, half_w, y0, y1 = 0.185, 0.160, 0.468, 0.770               # magnet panel between the side moulding and the belt line
+    zc, half_w, y0, y1 = 0.185, 0.140, 0.445, 0.708               # magnet panel between the side moulding and the pinstripe
     b = Builder(); nu, nv = 16, 16; info = {}
     for name, sx in (('lf_door', 1), ('rf_door', -1)):
         n, _, M = k.find(name); w = world_pos(n, M)
@@ -846,9 +846,13 @@ def paint_damage(k):
     return {'tris': len(F)}
 
 # ------------------------------------------------------------------ 15. double pinstripe along the beltline and across the trunk
-# height of the stripe's centre line along the car (z, y): about midway between the door handles and the window sills,
-# following the beltline down towards the headlights; level across the back of the trunk
-STRIPE_Y = [(-2.60, 0.755), (-0.90, 0.755), (-0.50, 0.752), (-0.20, 0.741), (0.20, 0.731), (0.60, 0.717), (0.90, 0.700), (1.20, 0.685), (1.50, 0.650), (1.74, 0.630)]
+# Height of the stripe's centre line along the car. The window sills are one straight line (y = 0.783 - 0.0222 z); the stripe
+# runs parallel to it, 5.5 cm lower, dead straight from the front fender to the back of the rear door, then levels off (over
+# a gentle radius) at the height it crosses the trunk.
+STRIPE_SILL = (0.783, -0.0222); STRIPE_DROP = 0.055; STRIPE_REAR_Y = 0.755; STRIPE_FRONT_Z = 1.62
+def stripe_y(z):
+    a = STRIPE_SILL[0] - STRIPE_DROP + STRIPE_SILL[1] * np.asarray(z, float); b = STRIPE_REAR_Y
+    return 0.5 * (a + b - np.sqrt((a - b) ** 2 + 0.004 ** 2))            # smooth minimum of the two straight runs
 STRIPE_BANDS = [(0.0017, 0.0052), (-0.0055, -0.0035)]      # upper (3.5 mm) and lower (2 mm) line, relative to the centre line
 STRIPE_RGB = (56, 24, 24)
 
@@ -873,21 +877,21 @@ def clip_band(V, F, f, lo, hi):
 def pinstripe(k):
     k.set_texture('gh_pinstripe.png', flat_texture(STRIPE_RGB))
     mid = k.add_material(simple_material('gh_pinstripe', 'gh_pinstripe.png', 0.40, 0.45, 0.30, 40.0))
-    zs, ys = zip(*STRIPE_Y); Vs = []; Fs = []; off = 0
+    Vs = []; Fs = []; off = 0
     for name in ('f_fenders', 'lf_door', 'rf_door', 'rear_doors', 'r_fenders', 'trunk'):
         n, _, M = k.find(name); w = world_pos(n, M); nr = unit(n.V[:, 3:6] @ M[:3, :3])
         V = np.zeros((len(w), 11)); V[:, :3] = w; V[:, 3:6] = nr; V[:, 6:8] = 0.5; V[:, 8:11] = [0, 0, 1]
-        f = w[:, 1] - np.interp(w[:, 2], zs, ys)
+        f = w[:, 1] - stripe_y(w[:, 2])
         fn = nr[n.F].mean(1); c = w[n.F].mean(1)
-        side = (np.abs(c[:, 0]) > 0.70) & (fn[:, 0] * np.sign(c[:, 0]) > 0.35) & (c[:, 2] < zs[-1] + 0.02)       # outer skin of the flanks
+        side = (np.abs(c[:, 0]) > 0.70) & (fn[:, 0] * np.sign(c[:, 0]) > (0.10 if name == 'f_fenders' else 0.35)) & (c[:, 2] < STRIPE_FRONT_Z + 0.03)   # outer skin of the flanks (the stripe climbs onto the fender's shoulder at the front)
         back = (c[:, 2] < -2.30) & (fn[:, 2] < -0.35)                                                             # rear face of trunk and corners
-        F = n.F[(side | back) & (np.abs(fn[:, 1]) < 0.85)]
+        F = n.F[(side | back) & (np.abs(fn[:, 1]) < (0.985 if name == 'f_fenders' else 0.85))]
         for lo, hi in STRIPE_BANDS:
             v_, f_ = clip_band(V, F, f, lo, hi)
             if len(v_): Vs.append(v_); Fs.append(f_ + off); off += len(v_)
     V = np.vstack(Vs); F = np.vstack(Fs)
     V[:, 3:6] = unit(V[:, 3:6]); V[:, :3] += V[:, 3:6] * 0.0008
-    keep = (V[F][:, :, 2] <= zs[-1]).all(1); F = F[keep]
+    keep = (V[F][:, :, 2] <= STRIPE_FRONT_Z).all(1); F = F[keep]
     k.add_mesh('PINSTRIPE', V, fix_winding(V, F), mid, shadows=0)
     return {'tris': len(F)}
 
