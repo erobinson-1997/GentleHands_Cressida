@@ -983,7 +983,10 @@ def ribbon(C, W, width, v0=0.0, rep=0.30):
     C = np.asarray(C, float); W = unit(np.broadcast_to(np.asarray(W, float), C.shape).copy())
     ln = np.r_[0, np.cumsum(np.linalg.norm(np.diff(C, axis=0), axis=1))] / rep + v0
     P = np.stack([C - W * width / 2, C + W * width / 2], axis=1); UV = np.stack([np.c_[np.zeros(len(C)), ln], np.c_[np.ones(len(C)), ln]], axis=1)
-    return two_sided(*surf(P, UV, (0, 1, 0)))
+    V, F = surf(P, UV, (0, 1, 0)); V2 = V.copy(); V2[:, 3:6] *= -1
+    T = np.gradient(C, axis=0); hand = (np.cross(W, T) * V[::2, 3:6]).sum()          # which face would show the lettering mirrored
+    (V if hand > 0 else V2)[:, 6] *= -1; (V if hand > 0 else V2)[:, 6] += 1
+    return join((V, F), (V2, F[:, ::-1]))
 
 def box(lo, hi, uv=(0.5, 0.5)):
     b = Builder(); (x0, y0, z0), (x1, y1, z1) = lo, hi; u = [uv] * 4
@@ -1012,7 +1015,7 @@ def bare_metal_image(size=1024, seed=31):
     """U: across the car; V: from the front edge of the seat pan (top row) over the pan and up the bulkhead to the parcel shelf"""
     S = size; yy, xx = np.mgrid[0:S, 0:S].astype(np.float64)
     n1 = noise((S, S), 40, seed); n2 = noise((S, S), 6, seed + 1); n3 = noise((S, S), 1.2, seed + 2)
-    img = np.empty((S, S, 3)); img[:] = (146, 149, 156); img *= (0.80 + 0.30 * n1 + 0.10 * n2)[..., None]
+    img = np.empty((S, S, 3)); img[:] = (112, 115, 122); img *= (0.80 + 0.30 * n1 + 0.10 * n2)[..., None]
     def over(rgb, a): img[:] = img * (1 - a[..., None]) + np.array(rgb, float) * a[..., None]
     def mask(fn, blur=0.0):
         im = Image.new('L', (S, S), 0); fn(ImageDraw.Draw(im))
@@ -1053,9 +1056,9 @@ def rear_seat_delete(k):
     prof = np.c_[zs, pan_height(np.full(len(zs), 0.30), zs)]; ln = np.r_[0, np.cumsum(np.linalg.norm(np.diff(prof, axis=0), axis=1))]
     UV = np.stack([(X + 0.745) / 1.49, np.broadcast_to((ln / ln[-1])[:, None], X.shape)], axis=-1)
     k.set_texture('gh_bare_metal.png', png_bytes(bare_metal_image()))
-    k.add_mesh('REAR_BARE_FLOOR', *surf(P, UV, (0, 1, 0.3)), k.add_material(simple_material('gh_bare_metal', 'gh_bare_metal.png', 0.36, 0.50, 0.22, 28.0)))
+    k.add_mesh('REAR_BARE_FLOOR', *surf(P, UV, (0, 1, 0.3)), k.add_material(simple_material('gh_bare_metal', 'gh_bare_metal.png', 0.26, 0.40, 0.18, 28.0)))
     # the body sides behind the rear door cards, which the seat back used to cover
-    im = np.empty((64, 64, 3)); im[:] = (128, 131, 138); im *= (0.85 + 0.3 * noise((64, 64), 5, 77))[..., None]
+    im = np.empty((64, 64, 3)); im[:] = (100, 103, 110); im *= (0.85 + 0.3 * noise((64, 64), 5, 77))[..., None]
     k.set_texture('gh_bare_metal_side.png', png_bytes(Image.fromarray(np.clip(im, 0, 255).astype(np.uint8), 'RGB')))
     b = Builder()
     for sx in (-1, 1):
@@ -1063,7 +1066,7 @@ def rear_seat_delete(k):
         for za, zb in zip(zz[:-1], zz[1:]):
             ya, yb = pan_height(np.array([x]), np.array([za]))[0] - 0.02, pan_height(np.array([x]), np.array([zb]))[0] - 0.02
             b.poly([(x, ya, za), (x, yb, zb), (x, 0.86, zb), (x, 0.86, za)], (-sx, 0, 0), [(za, ya), (zb, yb), (zb, 0.86), (za, 0.86)])
-    k.add_mesh('REAR_BARE_SIDES', *b.done(), k.add_material(simple_material('gh_bare_metal_side', 'gh_bare_metal_side.png', 0.34, 0.46, 0.18, 24.0)))
+    k.add_mesh('REAR_BARE_SIDES', *b.done(), k.add_material(simple_material('gh_bare_metal_side', 'gh_bare_metal_side.png', 0.24, 0.36, 0.15, 24.0)))
     return {'seat_tris_removed': gone}
 
 # ---- driver's bucket seat with harness
