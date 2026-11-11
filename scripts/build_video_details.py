@@ -14,7 +14,7 @@ from scipy.ndimage import gaussian_filter
 import config
 from kn5io import Kn5, Material, Node, world_pos, deform, split_mesh, update_bounds, unit
 
-STEPS = ['wheels_black', 'mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade', 'door_numbers', 'front_end', 'lower_panel', 'grille', 'clear_lamps', 'taillight_damage']
+STEPS = ['wheels_black', 'mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade', 'door_numbers', 'front_end', 'lower_panel', 'grille', 'clear_lamps', 'taillight_damage', 'paint_damage']
 PLATE_TEXT = '8XKQ407'          # made-up number (not the real plate); set to None to keep the original mod's plate
 PLATE_MOSAIC = True             # pixelate the number like a censored photo
 FRONT_PLATE = True              # hangs below the front bumper
@@ -770,6 +770,62 @@ def taillight_damage(k):
     for name, mat, out, tr in (('TAILLIGHT_SCUFFS_R', ms, 0.0010, 1), ('TAILLIGHT_DAMAGE_R', m, 0.0016, 0)):
         W = V.copy(); W[:, :3] += W[:, 3:6] * out; k.add_mesh(name, W, F, k.add_material(mat), transparent=tr, shadows=0)
     info['crack_tris'] = len(F); return info
+
+# ------------------------------------------------------------------ 14. paint rubbed through above the right tail light
+PD_BOX = (-0.55, -0.80, 0.82, 0.63)      # decal sheet seen from behind: x at its left / right edge, y at its top / bottom (m)
+PD_W, PD_H = 1024, 768
+
+def paint_damage_image():
+    """trunk lid (left of px 500): an oval sanded through to primer with dark bare metal in the middle, and a rubbed streak
+    down the lid's edge. Body corner (right of px 500): scraped dark, with pale brushed marks across it."""
+    yy, xx = np.mgrid[0:PD_H, 0:PD_W].astype(float); rgb = np.zeros((PD_H, PD_W, 3)); al = np.zeros((PD_H, PD_W))
+    def over(col, a):
+        nonlocal rgb, al
+        a = np.clip(a, 0, 1); out = a + al * (1 - a); w = np.where(out > 1e-6, a / np.maximum(out, 1e-6), 0)
+        rgb = rgb * (1 - w[:, :, None]) + np.array(col, float) * w[:, :, None]; al = out
+    def streaks(angle, seed, sig=(2.0, 26)):
+        S = max(PD_W, PD_H) * 2
+        n = Image.fromarray((noise((S, S), sig, seed) * 255).astype(np.uint8)).rotate(angle, resample=Image.BICUBIC)
+        n = np.asarray(n.crop(((S - PD_W) // 2, (S - PD_H) // 2, (S + PD_W) // 2, (S + PD_H) // 2))).astype(float) / 255
+        return (n - n.mean()) / n.std()
+    grain = 0.85 + 0.30 * noise((PD_H, PD_W), 3, 21)
+    primer = (188, 190, 196); metal = (74, 76, 82); lid = xx < 492
+    # trunk lid: sanded oval
+    d = np.sqrt(((xx - 300) / 150) ** 2 + ((yy - 300) / 100) ** 2) + 0.10 * (noise((PD_H, PD_W), 30, 22) - 0.5) * 2
+    over(metal, 0.80 * np.clip((0.86 - d) / 0.16, 0, 1) * lid)
+    over((128, 92, 76), 0.35 * np.exp(-(((xx - 372) / 50) ** 2 + ((yy - 228) / 22) ** 2)) * lid)                    # a touch of rust
+    over(primer, 0.88 * np.exp(-((d - 0.90) / 0.20) ** 2) * grain * lid)
+    over(primer, 0.55 * np.exp(-(((xx - 215) / 60) ** 2 + ((yy - 345) / 45) ** 2)) * grain * lid)                   # thicker on the inboard side
+    # trunk lid: rubbed streak down its outer edge to the lamp
+    cx = np.interp(yy, [330, 480, 640], [420, 452, 470]); wd = np.interp(yy, [330, 480, 640], [34, 22, 14])
+    over(primer, 0.80 * np.exp(-((xx - cx) / wd) ** 2) * np.clip((yy - 300) / 60, 0, 1) * np.clip((660 - yy) / 40, 0, 1) * grain * lid)
+    # body corner: scraped dark, pale brush marks
+    m = Image.new('L', (PD_W, PD_H), 0)
+    ImageDraw.Draw(m).polygon([(520, 330), (640, 215), (900, 300), (930, 520), (860, 640), (520, 650)], fill=255)
+    m = np.asarray(m.filter(ImageFilter.GaussianBlur(14))).astype(float) / 255 * ~lid
+    over((34, 34, 38), 0.90 * m)
+    s1 = streaks(32, 23); s2 = streaks(18, 24, (3.0, 40))
+    sw = np.exp(-(((xx - 640) / 150) ** 2 + ((yy - 520) / 120) ** 2)) + 0.9 * np.exp(-(((xx - 800) / 110) ** 2 + ((yy - 330) / 70) ** 2)) \
+        + 0.5 * np.exp(-(((xx - 850) / 60) ** 2 + ((yy - 560) / 60) ** 2))
+    over((206, 210, 218), 0.85 * m * np.clip(sw, 0, 1) * np.clip(0.30 + 0.55 * s1, 0, 1) ** 1.2 * 1.5)
+    over((150, 154, 162), 0.45 * m * np.clip(0.10 + 0.5 * s2, 0, 1))
+    al = gaussian_filter(al, 1.0)
+    return Image.fromarray(np.dstack([np.clip(rgb, 0, 255), np.clip(al, 0, 1) * 255]).astype(np.uint8), 'RGBA')
+
+def paint_damage(k):
+    k.set_texture('gh_paint_damage.png', png_bytes(paint_damage_image()))
+    m = simple_material('gh_paint_damage', 'gh_paint_damage.png', 0.45, 0.50, 0.12, 14.0, shader='ksPerPixelAT'); m.blend = 1
+    x0, x1, y0, y1 = PD_BOX; Vs = []; Fs = []; off = 0
+    for name in ('trunk', 'r_fenders'):                         # the decal follows the (dented) panels, 1.5 mm proud of them
+        n, _, M = k.find(name); w = world_pos(n, M); nr = unit(n.V[:, 3:6] @ M[:3, :3]); c = w[n.F].mean(1)
+        sel = (c[:, 0] < x0 + 0.02) & (c[:, 0] > x1 - 0.02) & (c[:, 1] < y0 + 0.02) & (c[:, 1] > y1 - 0.02) & (c[:, 2] < -2.2) & (nr[n.F].mean(1)[:, 2] < -0.15)
+        F = n.F[sel]; used = np.unique(F); re = np.full(len(w), -1); re[used] = np.arange(len(used))
+        V = np.zeros((len(used), 11)); V[:, :3] = w[used] + nr[used] * 0.0015; V[:, 3:6] = nr[used]
+        V[:, 6] = (w[used, 0] - x0) / (x1 - x0); V[:, 7] = (w[used, 1] - y0) / (y1 - y0); V[:, 8:11] = [-1, 0, 0]
+        Vs.append(V); Fs.append(re[F] + off); off += len(V)
+    V = np.vstack(Vs); F = np.vstack(Fs)
+    k.add_mesh('PAINT_DAMAGE_R', V, fix_winding(V, F), k.add_material(m), transparent=1, shadows=0)
+    return {'tris': len(F)}
 
 def build(src, out):
     k = Kn5.load(src); info = {}
