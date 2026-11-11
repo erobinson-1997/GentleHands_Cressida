@@ -1162,27 +1162,56 @@ def bucket_seat(k):
 # ---- manual shifter with the cloth bag as its boot
 SHIFT_XZ = (-0.02, 0.215); SHIFT_Y = 0.333      # where the lever comes out of the console; height of the console there
 
-def lathe(prof, v0, v1, seg=18, urep=1.0, tilt=0.0):
-    """rings of radius r at height h around the shifter axis; r may be a function of the angle"""
-    th = np.linspace(0, 2 * np.pi, seg + 1); P = []
+def lathe(prof, v0, v1, seg=18, urep=1.0, tilt=0.0, planar=None):
+    """rings of radius r at height h around the shifter axis; r may be a function of the angle.
+    planar=(u, v, scale): map the texture straight down onto the part (image up = front of the car) instead of round it"""
+    th = np.linspace(0, 2 * np.pi, seg + 1); P = []; R = []
     for r, h in prof:
-        rr = r(th) if callable(r) else np.full(len(th), r)
+        rr = r(th) if callable(r) else np.full(len(th), r); R.append(rr)
         P.append(np.c_[SHIFT_XZ[0] + rr * np.cos(th), np.full(len(th), h), SHIFT_XZ[1] + rr * np.sin(th) - (h - SHIFT_Y) * np.tan(tilt)])
-    P = np.array(P); hs = np.array([h for _, h in prof]); f = (hs - hs[0]) / (hs[-1] - hs[0])
-    UV = np.stack([np.broadcast_to((th / (2 * np.pi) * urep)[None], P.shape[:2]), np.broadcast_to((v0 + (v1 - v0) * f)[:, None], P.shape[:2])], axis=-1)
+    P = np.array(P); R = np.array(R); hs = np.array([h for _, h in prof]); f = (hs - hs[0]) / (hs[-1] - hs[0])
+    if planar: UV = np.stack([planar[0] - R * np.cos(th) * planar[2], planar[1] - R * np.sin(th) * planar[2]], axis=-1)
+    else: UV = np.stack([np.broadcast_to((th / (2 * np.pi) * urep)[None], P.shape[:2]), np.broadcast_to((v0 + (v1 - v0) * f)[:, None], P.shape[:2])], axis=-1)
     return surf(P, UV, 'out')
 
-def shifter_image(size=256, seed=51):
-    """top half: black leather with a stitched seam; bottom half: the green cloth bag (its gathered, cream-stitched hem at the top)"""
-    S = size; h = S // 2; img = np.empty((S, S, 3)); yy, xx = np.mgrid[0:S, 0:S].astype(np.float64)
-    img[:h] = (24, 24, 26); img[:h] *= (0.8 + 0.5 * noise((h, S), 2, seed))[..., None]
-    img[h:] = (64, 148, 104); folds = 0.5 + 0.5 * np.sin(xx[h:] / S * 2 * np.pi * 9 + 3 * noise((h, S), 12, seed + 1) * 6)
-    img[h:] *= (0.62 + 0.38 * folds * (0.6 + 0.4 * noise((h, S), 5, seed + 2)))[..., None]
+KNOB_BASE, KNOB_SEAM, KNOB_TOP = 0.158, 0.236, 0.2500       # heights above the console: bottom of the knob, its stitched ring, its crown
+KNOB_R = 0.0250                                             # radius at the stitched ring
+
+def shifter_image(size=1024, seed=51):
+    """top half: the leather shift knob (TRD knob as fitted to the AE86) - its side with the badge and the baseball stitching, the
+    crown with the shift pattern, a plain strip for the lever; bottom half: the green cloth bag (gathered, cream-stitched hem at the top)"""
+    S = size; h = S // 2; k_ = S // 512; img = np.empty((S, S, 3))
+    img[:h] = (30, 30, 32); img[:h] *= (0.78 + 0.44 * noise((h, S), 1.2 * k_, seed))[..., None]                  # leather grain
+    yy, xx = np.mgrid[0:h, 0:S].astype(np.float64)
+    img[h:] = (64, 148, 104); folds = 0.5 + 0.5 * np.sin(xx / S * 2 * np.pi * 9 + 3 * noise((h, S), 12 * k_, seed + 1) * 6)
+    img[h:] *= (0.62 + 0.38 * folds * (0.6 + 0.4 * noise((h, S), 5 * k_, seed + 2)))[..., None]
     im = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), 'RGB'); d = ImageDraw.Draw(im)
-    for x0 in range(0, S, 10):
-        d.line([(x0, 70), (x0 + 5, 73)], fill=(120, 120, 124), width=1)                                         # stitches round the knob
-        d.line([(x0, h + 12), (x0 + 6, h + 12)], fill=(214, 206, 170), width=2); d.line([(x0 + 2, h + 20), (x0 + 8, h + 20)], fill=(214, 206, 170), width=2)
-    d.rectangle((0, h, S, h + 5), fill=(30, 74, 52))
+    for x0 in range(0, S, 10 * k_):                                                                              # hem of the bag
+        d.line([(x0, h + 12 * k_), (x0 + 6 * k_, h + 12 * k_)], fill=(214, 206, 170), width=2 * k_)
+        d.line([(x0 + 2 * k_, h + 20 * k_), (x0 + 8 * k_, h + 20 * k_)], fill=(214, 206, 170), width=2 * k_)
+    d.rectangle((0, h, S, h + 5 * k_), fill=(30, 74, 52))
+    # side of the knob: rows 0..300 run from the stitched ring down to its base, the columns once round it
+    thread = (78, 78, 82); sy = 16
+    d.line([(0, sy), (S, sy)], fill=(12, 12, 13), width=3)                                                       # seam under the crown, baseball stitched
+    for x0 in range(0, S, 22):
+        d.line([(x0, sy - 9), (x0 + 9, sy)], fill=thread, width=3); d.line([(x0 + 11, sy + 9), (x0 + 20, sy)], fill=thread, width=3)
+    sx = S // 2
+    d.line([(sx, sy), (sx, 300)], fill=(12, 12, 13), width=4)                                                    # seam down its length
+    for y0 in range(sy + 8, 296, 9):
+        d.line([(sx - 20, y0 - 3), (sx, y0)], fill=thread, width=2); d.line([(sx + 20, y0 + 1), (sx, y0 + 4)], fill=thread, width=2)
+    bx, by, bw, bh = S // 4 - 150, 176, 300, 46                                                                  # badge, facing the driver
+    d.rounded_rectangle((bx - 3, by - 3, bx + bw + 3, by + bh + 3), radius=8, fill=(150, 152, 156)); d.rounded_rectangle((bx, by, bx + bw, by + bh), radius=6, fill=(10, 10, 11))
+    f1 = font(['arialbd.ttf'], 15); d.text((bx + bw // 2, by + 3), 'TOYOTA MOTOR SPORTS', font=f1, fill=(214, 30, 36), anchor='mt')
+    for i, col in enumerate([(236, 236, 238), (236, 236, 238), (214, 30, 36)]):
+        x1 = bx + 12 + i * 26; d.polygon([(x1 + 12, by + 21), (x1 + 34, by + 21), (x1 + 22, by + bh - 4), (x1, by + bh - 4)], fill=col)
+    f2 = font(['arialbi.ttf', 'arialbd.ttf'], 27); d.text((bx + 104, by + 18), 'TRD', font=f2, fill=(240, 240, 242)); d.text((bx + 105, by + 18), 'TRD', font=f2, fill=(240, 240, 242))
+    im = im.resize((S, S))                                                                                       # (keeps everything above in one pass)
+    # crown: the shift pattern pressed into the leather, 160 px square at (0, 310)
+    d = ImageDraw.Draw(im); cx, cy = 80, 390; emb = (64, 64, 68); f3 = font(['arialbd.ttf'], 26)
+    d.line([(cx - 32, cy), (cx + 32, cy)], fill=emb, width=4)
+    for i, (a, b) in enumerate(['12', '34', '5R']):
+        x1 = cx - 32 + 32 * i; d.line([(x1, cy - 20), (x1, cy + 20)], fill=emb, width=4)
+        d.text((x1, cy - 22), a, font=f3, fill=emb, anchor='mb'); d.text((x1, cy + 22), b, font=f3, fill=emb, anchor='mt')
     return im
 
 def shifter(k):
@@ -1192,11 +1221,15 @@ def shifter(k):
         neck = 0.021 + 0.012 * max(0.0, (t_ - 0.82) / 0.18)                                                      # gathered round the lever, hem flaring out again
         m = ss(0.0, 0.85, t_) ** 0.8
         return lambda th: base(th) * (1 - m) + neck * m + 0.006 * np.sin(7 * th + 4 * t_) * np.sin(np.pi * min(t_ * 1.15, 1.0))
-    ts = np.linspace(0, 1, 11)
-    parts = [lathe([(bag(t_), SHIFT_Y - 0.004 + 0.082 * t_) for t_ in ts], 0.99, 0.51, seg=28, urep=2.0, tilt=tilt * 0.5),
-             lathe([(0.009, SHIFT_Y + 0.045), (0.009, SHIFT_Y + 0.160)], 0.30, 0.45, seg=10, tilt=tilt),
-             lathe([(0.011, SHIFT_Y + 0.150), (0.016, SHIFT_Y + 0.165), (0.023, SHIFT_Y + 0.190), (0.0275, SHIFT_Y + 0.215), (0.0265, SHIFT_Y + 0.232),
-                    (0.019, SHIFT_Y + 0.245), (0.008, SHIFT_Y + 0.250), (0.0005, SHIFT_Y + 0.251)], 0.45, 0.02, seg=18, tilt=tilt)]
+    ts = np.linspace(0, 1, 11); Y = SHIFT_Y; B, Sm, T = Y + KNOB_BASE, Y + KNOB_SEAM, Y + KNOB_TOP
+    # the knob: slim at the lever, swelling to a wide flat-topped head; the side is one leather panel, the crown another
+    side = [(0.0080, B - 0.0005), (0.0135, B), (0.0150, B + 0.004), (0.0152, B + 0.018), (0.0162, B + 0.032), (0.0183, B + 0.046), (0.0212, B + 0.058),
+            (0.0236, B + 0.068), (0.0248, B + 0.075), (KNOB_R, Sm)]
+    crown = [(KNOB_R, Sm), (0.0244, Sm + 0.0045), (0.0222, Sm + 0.0085), (0.0180, Sm + 0.0115), (0.0120, Sm + 0.0132), (0.0060, Sm + 0.0139), (0.0004, T)]
+    parts = [two_sided(*lathe([(bag(t_), Y - 0.004 + 0.082 * t_) for t_ in ts], 0.99, 0.51, seg=28, urep=2.0, tilt=tilt * 0.5)),   # seen from inside too, through the open hem
+             lathe([(0.009, Y + 0.045), (0.009, B + 0.004)], 0.475, 0.495, seg=10, tilt=tilt),
+             lathe(side, 300 / 1024, 16 / 1024, seg=24, urep=-1.0, tilt=tilt),                                   # urep -1: the badge reads the right way round from outside
+             lathe(crown, 0, 0, seg=24, tilt=tilt, planar=(80 / 1024, 390 / 1024, 72 / 1024 / KNOB_R))]
     k.set_texture('gh_shifter.png', png_bytes(shifter_image()))
     V, F = join(*parts)
     k.add_mesh('SHIFTER', V, F, k.add_material(simple_material('gh_shifter', 'gh_shifter.png', 0.42, 0.48, 0.12, 14.0)))
@@ -1378,11 +1411,15 @@ def interior_colors(k):
     from scipy.sparse import coo_matrix
     from scipy.sparse.csgraph import connected_components
     e = np.r_[n.F[:, [0, 1]], n.F[:, [1, 2]]]; ni, isl = connected_components(coo_matrix((np.ones(len(e)), (e[:, 0], e[:, 1])), shape=(len(w),) * 2), directed=False)
-    grey_isl = np.zeros(ni, bool)
+    grey_isl = np.zeros(ni, bool); flank = np.zeros(len(w), bool)
     for i in np.unique(isl[n.F[wide[lab[n.F[:, 0]]]][:, 0]]):
         p = w[isl == i]; lo, hi = p.min(0), p.max(0)
-        glove_box = hi[0] < -0.13 and hi[1] < 0.70 and lo[2] > 0.40; knee_panel = lo[0] > 0.12 and hi[1] < 0.63 and lo[2] > 0.44
+        glove_box = hi[0] < -0.22 and hi[1] < 0.70 and lo[2] > 0.40; knee_panel = lo[0] > 0.12 and hi[1] < 0.63 and lo[2] > 0.44
         grey_isl[i] = glove_box or knee_panel
+        if lo[0] > -0.23 and hi[0] < -0.13 and hi[1] < 0.70 and lo[2] > 0.40: flank |= isl == i
+    # the flank between the centre stack and the glove box is a handful of loose triangles, each shaded on its own: shade them as one surface
+    tri = flank[n.F[:, 0]]; nw = unit(weld_normals(n.V[:, :3].astype(np.float64), n.F[tri]))
+    nw = np.where((nw * n.V[:, 3:6]).sum(1, keepdims=True) < 0, -nw, nw); n.V[flank, 3:6] = nw[flank]
     lower = grey_isl[isl[n.F[:, 0]]]
     Vt, Ft = split_mesh(n, lower); n.mat = charcoal
     m2 = Node(2, 'dashboard_lower'); m2.V, m2.F, m2.mat, m2.flags, m2.layer, m2.lod = Vt, Ft, grey, n.flags, n.layer, n.lod; update_bounds(m2); parent.children.append(m2)
