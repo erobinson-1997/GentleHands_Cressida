@@ -15,7 +15,7 @@ import config
 from kn5io import Kn5, Material, Node, world_pos, deform, split_mesh, update_bounds, unit, weld_normals
 
 STEPS = ['wheels_black', 'mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade', 'door_numbers', 'front_end', 'lower_panel', 'grille', 'clear_lamps', 'taillight_damage', 'trunk_face', 'pinstripe', 'paint_damage',
-         'rear_seat_delete', 'bucket_seat', 'shifter', 'floor_mat', 'head_unit']
+         'rear_seat_delete', 'bucket_seat', 'shifter', 'floor_mat', 'head_unit', 'passenger_seat', 'interior_colors']
 PLATE_TEXT = '8XKQ407'          # made-up number (not the real plate); set to None to keep the original mod's plate
 PLATE_MOSAIC = True             # pixelate the number like a censored photo
 FRONT_PLATE = True              # hangs below the front bumper
@@ -1292,6 +1292,94 @@ def head_unit(k):
     V, F = b.done()
     k.add_mesh('HEAD_UNIT', V, F, k.add_material(simple_material('gh_head_unit', 'gh_head_unit.png', 0.40, 0.45, 0.55, 60.0)), shadows=0)
     return {'stock_radio_tris_removed': gone, 'tris': len(F)}
+
+# ---- passenger seat: the stock grey velour seat
+PASS_X = -0.385
+PASS_CUSHION = [(0.135, 0.310, 0.255, 0.000), (0.130, 0.385, 0.270, 0.010), (0.070, 0.415, 0.280, 0.022), (-0.100, 0.405, 0.285, 0.030),
+                (-0.260, 0.390, 0.285, 0.030), (-0.360, 0.385, 0.280, 0.020)]
+PASS_BACK = [(-0.335, 0.360, 0.262, 0.020), (-0.325, 0.450, 0.275, 0.045), (-0.345, 0.570, 0.275, 0.050), (-0.375, 0.680, 0.270, 0.040),
+             (-0.400, 0.760, 0.250, 0.020), (-0.414, 0.805, 0.205, 0.004), (-0.420, 0.822, 0.140, 0.000)]
+PASS_HEAD = [(-0.436, 0.842, 0.090, 0.000), (-0.430, 0.868, 0.132, 0.000), (-0.436, 0.950, 0.135, 0.000), (-0.446, 1.000, 0.122, 0.000),
+             (-0.452, 1.018, 0.070, 0.000)]
+VELOUR_RGB = (124, 128, 135)
+
+def loft(path, xc, v0, v1, thick, stations=22, nu=17):
+    """a cushion: `path` rows are z, y of the centre line of its face, half width, bolster height; thick = (at the edge, extra in the middle)"""
+    from scipy.interpolate import PchipInterpolator
+    path = np.asarray(path, float); d = np.r_[0, np.cumsum(np.linalg.norm(np.diff(path[:, :2], axis=0), axis=1))]; f = PchipInterpolator(d / d[-1], path)
+    S = np.linspace(0, 1, stations); q = f(S); t = unit(f.derivative()(S)[:, :2]); nrm = np.c_[t[:, 1], -t[:, 0]]
+    uf = np.linspace(-1, 1, nu); ub = np.linspace(1, -1, nu // 2 + 1)
+    def pt(i, u, back):
+        z, y, w, h = q[i]; off = -(thick[0] + thick[1] * (1 - u * u)) if back else h * ss(0.45, 0.95, abs(u)) + 0.012 * (1 - u ** 4)
+        return [xc + w * u, y + nrm[i, 1] * off, z + nrm[i, 0] * off]
+    loop = [(u, False) for u in uf] + [(u, True) for u in ub] + [(-1.0, False)]
+    U = np.r_[0.02 + 0.46 * (uf + 1) / 2, 0.52 + 0.46 * (1 - ub) / 2, 1.02]
+    P = np.array([[pt(i, u, bk) for u, bk in loop] for i in range(stations)])
+    UV = np.stack([np.broadcast_to(U[None], P.shape[:2]), np.broadcast_to((v0 + (v1 - v0) * S)[:, None], P.shape[:2])], axis=-1)
+    caps = Builder()
+    for i, sgn in ((0, -1.0), (stations - 1, 1.0)):
+        caps.poly(P[i, :-1], (0, sgn * t[i, 1], sgn * t[i, 0]), [(0.75, v0 + (v1 - v0) * S[i])] * (P.shape[1] - 1))
+    return join(surf(P, UV, 'out'), caps.done())
+
+def velour_image(size=1024, seed=81):
+    """left half: the faces of cushion (top third), backrest (middle) and headrest (bottom quarter); right half: their backs and sides"""
+    S = size; yy, xx = np.mgrid[0:S, 0:S].astype(np.float64)
+    img = np.empty((S, S, 3)); img[:] = VELOUR_RGB
+    img *= (0.88 + 0.16 * noise((S, S), 40, seed) + 0.10 * noise((S, S), 5, seed + 1))[..., None]             # the nap lying this way and that
+    img *= (0.94 + 0.12 * noise((S, S), 0.7, seed + 2))[..., None]
+    def over(rgb, a): img[:] = img * (1 - a[..., None]) + np.array(rgb, float) * a[..., None]
+    def mask(fn, blur=0.0):
+        im = Image.new('L', (S, S), 0); fn(ImageDraw.Draw(im))
+        return np.asarray(im.filter(ImageFilter.GaussianBlur(blur)) if blur else im, np.float64) / 255
+    px = lambda u: (0.02 + 0.46 * (u + 1) / 2) * S
+    panels = [(px(-0.60), 0.035 * S, px(0.60), 0.300 * S), (px(-0.60), 0.385 * S, px(0.60), 0.690 * S)]       # centre inserts of cushion and backrest
+    ins = mask(lambda d: [d.rounded_rectangle(b_, radius=34, fill=255) for b_ in panels], 1.0)
+    over((142, 146, 152), 0.85 * ins); img *= (1 - 0.13 * ins * (0.5 + 0.5 * np.sin(xx * 2 * np.pi / 7.0)))[..., None]   # ribbed cloth, ribs running fore and aft
+    over((66, 68, 74), 0.75 * mask(lambda d: [d.rounded_rectangle(b_, radius=34, outline=255, width=5) for b_ in panels], 1.3))
+    over((66, 68, 74), 0.55 * mask(lambda d: [d.line([(px(-0.60), r_ * S), (px(0.60), r_ * S)], fill=255, width=3) for r_ in (0.17, 0.49, 0.59)], 1.2))
+    img[:, S // 2:] *= 0.93
+    return Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), 'RGB')
+
+def remove_mesh(k, name):
+    n, parent, _ = k.find(name); parent.children.remove(n); return len(n.F)
+
+def passenger_seat(k):
+    gone = remove_mesh(k, 'seatleather1') + remove_mesh(k, 'seatleather2')                # by now only the passenger seat is left in them
+    parts = [loft(PASS_CUSHION, PASS_X, 0.01, 0.32, (0.075, 0.035)), loft(PASS_BACK, PASS_X, 0.35, 0.73, (0.060, 0.045)),
+             loft(PASS_HEAD, PASS_X, 0.77, 0.99, (0.050, 0.035), stations=12, nu=13)]
+    k.set_texture('gh_velour.png', png_bytes(velour_image()))
+    k.add_mesh('PASSENGER_SEAT', *join(*parts), k.add_material(simple_material('gh_velour', 'gh_velour.png', 0.42, 0.48, 0.03, 5.0)))
+    posts = [box((PASS_X + sx * 0.055 - 0.006, 0.79, -0.462), (PASS_X + sx * 0.055 + 0.006, 0.86, -0.450)) for sx in (-1, 1)]
+    posts.append(box((PASS_X - 0.24, FLOOR_Y, -0.33), (PASS_X + 0.24, 0.30, 0.11)))                             # seat base down to the floor
+    k.add_mesh('PASSENGER_SEAT_BASE', *join(*posts), k.mat_id('plastic_black1'))
+    return {'stock_seat_tris_removed': gone}
+
+# ---- interior colours: charcoal upper dash and door cards, mid-grey lower dash and door inserts, light grey headliner and pillars
+TRIM_CHARCOAL = (66, 68, 73); TRIM_GREY = (120, 123, 130); HEADLINER_GREY = (150, 153, 159); DOOR_CLOTH = (112, 116, 123)
+DASH_SPLIT_Y = 0.665              # the dash is charcoal above this height (top roll, gauge hood) and grey below (knee panel, glove box)
+
+def grain_texture(rgb, seed, size=256, amount=0.10):
+    a = np.empty((size, size, 3)); a[:] = rgb; a *= (1 - amount + 2 * amount * noise((size, size), 0.8, seed))[..., None]
+    return png_bytes(Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), 'RGB'))
+
+def retone(k, base, name, rgb, seed, ambient=None, diffuse=None):
+    """a copy of material `base` whose detail texture (the one that sets its colour) is a plain grain of the given colour"""
+    m = k.materials[k.mat_id(base)].copy(name); k.set_texture(name + '.png', grain_texture(rgb, seed))
+    for t in m.tex:
+        if t[0] == 'txDetail': t[2] = name + '.png'
+    if ambient is not None: m.set('ksAmbient', ambient); m.set('ksDiffuse', diffuse)
+    return k.add_material(m)
+
+def interior_colors(k):
+    charcoal = retone(k, 'dashleather', 'gh_trim_charcoal', TRIM_CHARCOAL, 91); grey = retone(k, 'dashleather', 'gh_trim_grey', TRIM_GREY, 92)
+    n, parent, M = k.find('dashboard'); w = world_pos(n, M); nc, lab = components(w, n.F)
+    wide = np.array([np.ptp(w[lab == c][:, 0]) > 1.0 for c in range(nc)])                 # the dash itself spans the car; door cards and trims do not
+    c = w[n.F].mean(1); lower = wide[lab[n.F[:, 0]]] & (c[:, 1] < DASH_SPLIT_Y)
+    Vt, Ft = split_mesh(n, lower); n.mat = charcoal
+    m2 = Node(2, 'dashboard_lower'); m2.V, m2.F, m2.mat, m2.flags, m2.layer, m2.lod = Vt, Ft, grey, n.flags, n.layer, n.lod; update_bounds(m2); parent.children.append(m2)
+    k.find('carpetroof')[0].mat = retone(k, 'carpet', 'gh_headliner', HEADLINER_GREY, 93, ambient=0.40, diffuse=0.36)
+    k.find('carts.001')[0].mat = retone(k, 'seatleather2', 'gh_door_cloth', DOOR_CLOTH, 94)
+    return {'lower_dash_tris': int(lower.sum())}
 
 def build(src, out):
     k = Kn5.load(src); info = {}
