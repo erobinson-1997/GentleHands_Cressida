@@ -1423,8 +1423,8 @@ def interior_colors(k):
 #   pine debris    gh_debris.png on DEBRIS_LAYER, a shell 2.5 mm above the top of the car; clear in the model itself
 SKINS = config.PROJECT / 'gentlehands_toyota_cressida_mx83' / 'skins'; BASE_SKIN = 'silver_176'
 DEBRIS_BOX = (-0.96, 0.96, -2.50, 2.14)         # x0, x1, z0, z1 covered by the top-down debris texture
-DEBRIS_SRC = (('bonnet', 0.45), ('roof', 0.45), ('trunk', 0.45), ('r_fenders', 0.45), ('f_fenders', 0.45), ('rear_doors', 0.45), ('lf_door', 0.45),
-              ('rf_door', 0.45), ('wiper_part001', 0.45), ('window_ext', 0.30))      # mesh, how far its normal must point up
+DEBRIS_SRC = (('bonnet', 0.60), ('roof', 0.60), ('trunk', 0.60), ('r_fenders', 0.60), ('f_fenders', 0.60), ('rear_doors', 0.60), ('lf_door', 0.60),
+              ('rf_door', 0.60), ('wiper_part001', 0.45), ('window_ext', 0.60))      # mesh, how far its normal must point up
 DEBRIS_CELL = 0.004
 _debris = {}
 
@@ -1447,52 +1447,58 @@ def debris_layer(k):
     o = np.argsort(P[:, 1]); H = np.zeros((gh, gw)); kind = np.zeros((gh, gw), np.int64); H[iz[o], ix[o]] = P[o, 1]; kind[iz[o], ix[o]] = K[o]      # the topmost surface wins
     _debris['H'] = H; _debris['kind'] = kind
     k.set_texture('gh_debris.png', png_bytes(Image.new('RGBA', (8, 8), (150, 100, 50, 0))))
-    m = simple_material('gh_debris', 'gh_debris.png', 0.45, 0.50, 0.04, 8.0, shader='ksPerPixelAT', alpha_ref=0.25); m.alpha_tested = 1
+    m = simple_material('gh_debris', 'gh_debris.png', 0.36, 0.40, 0.03, 8.0, shader='ksPerPixelAT', alpha_ref=0.25); m.alpha_tested = 1
     k.add_mesh('DEBRIS_LAYER', V, fix_winding(V, F), k.add_material(m), shadows=0)
     return {'tris': len(F), 'covered_m2': round(float((kind > 0).sum() * DEBRIS_CELL ** 2), 2)}
 
 def debris_density(H, kind):
-    """how thickly the needles lie: evenly on the flat panels, thin on the glass they slide off, heaped at the foot of the glass, in the cowl and in the panel gaps"""
+    """needles per square metre: a few strays on the panels, fewer on the glass they slide off, and a thick mat where they pool - in the
+    cowl under the windscreen, and a little along the foot of each window"""
     cov = kind > 0; gh = len(H); zrow = DEBRIS_BOX[2] + (np.arange(gh) + 0.5) * DEBRIS_CELL
     Hs = gaussian_filter(np.where(cov, H, 0.0), 6) / np.maximum(gaussian_filter(cov.astype(float), 6), 1e-3)
-    D = np.where(kind == 1, 1.0, 0.0) + np.where(kind == 3, 3.5, 0.0) + np.where(kind == 2, 0.30, 0.0)
-    D += 2.5 * np.clip((Hs - H) / 0.006, 0, 1) * (kind == 1)
-    for rows in (zrow > -0.5, zrow < -0.5):                       # windscreen, rear window
-        g = (kind == 2) & rows[:, None]; foot = np.where(g, H, np.inf).min(0)
-        D += np.where(g, 4.0 * np.exp(-(H - foot[None]) / 0.03), 0.0)
-    return D * cov
+    D = np.where(kind == 1, 22.0, 0.0) + np.where(kind == 2, 6.0, 0.0)
+    D += 60.0 * np.clip((Hs - H) / 0.006, 0, 1) * (kind == 1)                               # panel gaps, gutters
+    pool = (kind == 3).astype(float)                                                        # the cowl itself is all but hidden under the hood's rear edge,
+    for rows, heap in ((zrow > -0.5, 1.0), (zrow < -0.5, 0.0)):                             # so the mat lies along the foot of the windscreen, round the wipers
+        g = (kind == 2) & rows[:, None]; foot = np.where(g, H, np.inf).min(0); foot = np.where(np.isfinite(foot), foot, 0.0)
+        lift = np.where(g, H - foot[None], 1.0)
+        pool += heap * np.exp(-(lift / 0.024) ** 2); D += np.where(g, 220.0 * np.exp(-lift / 0.012), 0.0)
+    return D * cov, 15000.0 * pool * cov
 
-def debris_image(W=2048, Hpx=4096, seed=103, per_m2=420):
+def debris_image(W=2048, Hpx=4096, seed=103):
     H, kind = _debris['H'], _debris['kind']; gh, gw = H.shape; rng = np.random.default_rng(seed); x0, x1, z0, z1 = DEBRIS_BOX
     S = 2; sx, sz = W * S / (x1 - x0), Hpx * S / (z1 - z0)                                  # drawn at twice the size, then reduced
-    im = Image.new('RGBA', (W * S, Hpx * S), (150, 100, 50, 0)); d = ImageDraw.Draw(im)
-    def scatter(D, count):
-        p = D.ravel() / D.sum(); i = rng.choice(D.size, count, p=p); r, c = np.divmod(i, gw)
+    im = Image.new('RGBA', (W * S, Hpx * S), (104, 84, 60, 0)); d = ImageDraw.Draw(im)
+    def scatter(D, per_m2=1.0):
+        count = int(per_m2 * D.sum() * DEBRIS_CELL ** 2)
+        if count == 0: return np.zeros(0), np.zeros(0)
+        i = rng.choice(D.size, count, p=D.ravel() / D.sum()); r, c = np.divmod(i, gw)
         return x0 + (c + rng.random(count)) * DEBRIS_CELL, z0 + (r + rng.random(count)) * DEBRIS_CELL
     px = lambda x, z: ((x - x0) * sx, (z - z0) * sz)
     def blob(x, z, r, col):
         cx, cy = px(x, z); d.ellipse((cx - r * sx, cy - r * sz, cx + r * sx, cy + r * sz), fill=col)
-    cov = (kind > 0).astype(float); area = cov.sum() * DEBRIS_CELL ** 2
-    # sap: amber drops, some run together, some dried to pale specks; and the grit that sticks to it
-    for x, z in zip(*scatter(cov, int(900 * area))):
-        t = rng.random(); big = rng.random() < 0.06; r = rng.uniform(0.004, 0.008) if big else rng.uniform(0.0012, 0.004)
-        col = (176, 128, 52) if t < 0.50 else (126, 84, 30) if t < 0.90 else (196, 186, 160); f = rng.uniform(0.8, 1.15)
-        blob(x, z, r, tuple(int(min(255, v * f)) for v in col) + (255,))
-        if big:
-            for _ in range(rng.integers(2, 5)): blob(x + rng.normal(0, r), z + rng.normal(0, r), r * rng.uniform(0.4, 0.8), col + (255,))
-    D = debris_density(H, kind)
-    for x, z in zip(*scatter(D, int(1500 * D.sum() * DEBRIS_CELL ** 2))):
-        f = rng.uniform(0.6, 1.1); blob(x, z, rng.uniform(0.001, 0.0028), (int(88 * f), int(58 * f), int(32 * f), 255))
-    # needles: bundles of two or three joined at the sheath, mostly dead and brown, a few still green
-    n = int(per_m2 * D.sum() * DEBRIS_CELL ** 2); xs, zs = scatter(D, n); wd = max(int(round(0.0019 * sx)), 2)
+    def needle(x, z, L, col, wd):
+        a = rng.uniform(0, 2 * np.pi); bend = rng.normal(0, 0.12); s = np.linspace(0, 1, 4)
+        d.line([px(x + L * t * np.cos(a + bend * t), z + L * t * np.sin(a + bend * t)) for t in s], fill=col + (255,), width=wd, joint='curve')
+    tone = lambda col, f: tuple(int(min(255, c * f)) for c in col)
+    cov = (kind > 0).astype(float); D, pool = debris_density(H, kind); thin = max(int(round(0.0013 * sx)), 2)
+    # sap: a fine speckle of dull dried drops, and the odd tan blotch a couple of centimetres across
+    for x, z in zip(*scatter(cov, 160)):
+        blob(x, z, rng.uniform(0.0008, 0.0020), tone((150, 144, 128) if rng.random() < 0.6 else (112, 96, 70), rng.uniform(0.85, 1.1)) + (255,))
+    for x, z in zip(*scatter(cov, 3.0)):
+        r = rng.uniform(0.004, 0.009); col = tone((168, 140, 86), rng.uniform(0.85, 1.1)) + (255,)
+        for _ in range(rng.integers(3, 7)): blob(x + rng.normal(0, r * 0.7), z + rng.normal(0, r * 0.7), r * rng.uniform(0.35, 0.8), col)
+    # stray needles and bits of twig: short, thin, weathered grey-brown
+    xs, zs = scatter(D); n = len(xs)
     for x, z in zip(xs, zs):
-        ang = rng.uniform(0, 2 * np.pi); t = rng.random(); f = rng.uniform(0.75, 1.15)
-        base = (168, 106, 48) if t < 0.55 else (128, 78, 36) if t < 0.86 else (86, 112, 52)
-        for j in range(2 if rng.random() < 0.7 else 3):
-            a = ang + rng.normal(0, 0.14); L = rng.uniform(0.055, 0.125); bend = rng.normal(0, 0.10); s = np.linspace(0, 1, 5)
-            qx = x + L * s * np.cos(a + bend * s); qz = z + L * s * np.sin(a + bend * s); g = f * rng.uniform(0.9, 1.1)
-            d.line([px(u, v) for u, v in zip(qx, qz)], fill=tuple(int(min(255, c * g)) for c in base) + (255,), width=wd, joint='curve')
-        blob(x, z, 0.0016, (70, 46, 28, 255))
+        col = tone((112, 88, 62) if rng.random() < 0.7 else (78, 64, 50), rng.uniform(0.8, 1.15)); needle(x, z, rng.uniform(0.02, 0.06), col, thin)
+        if rng.random() < 0.3: needle(x, z, rng.uniform(0.02, 0.05), col, thin)
+    # the mat that collects in the cowl: dark litter underneath, dry tan needles on top
+    for x, z in zip(*scatter(pool, 0.6)): blob(x, z, rng.uniform(0.002, 0.005), tone((70, 56, 42), rng.uniform(0.7, 1.1)) + (255,))
+    xs, zs = scatter(pool); n += len(xs)
+    for x, z in zip(xs, zs):
+        t = rng.random(); col = tone((150, 122, 82) if t < 0.5 else (122, 94, 62) if t < 0.85 else (92, 70, 48), rng.uniform(0.8, 1.15))
+        needle(x, z, rng.uniform(0.025, 0.06), col, thin + 1)
     return im.resize((W, Hpx), Image.LANCZOS), n
 
 def write_skins():
