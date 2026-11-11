@@ -14,7 +14,7 @@ from scipy.ndimage import gaussian_filter
 import config
 from kn5io import Kn5, Material, Node, world_pos, deform, split_mesh, update_bounds, unit
 
-STEPS = ['wheels_black', 'mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade', 'door_numbers', 'front_end', 'lower_panel', 'grille', 'clear_lamps', 'taillight_damage', 'paint_damage']
+STEPS = ['wheels_black', 'mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade', 'door_numbers', 'front_end', 'lower_panel', 'grille', 'clear_lamps', 'taillight_damage', 'pinstripe', 'paint_damage']
 PLATE_TEXT = '8XKQ407'          # made-up number (not the real plate); set to None to keep the original mod's plate
 PLATE_MOSAIC = True             # pixelate the number like a censored photo
 FRONT_PLATE = True              # hangs below the front bumper
@@ -815,8 +815,8 @@ def paint_damage_image():
     over((226, 228, 232), 0.75 * spot * lid)
     over((158, 120, 104), 0.50 * soft(lambda d: d.ellipse((330, 144, 452, 180), fill=255), 9) * blot * lid)       # rust in the top lobe
     over((184, 192, 208), 0.62 * tail * (0.45 + 0.55 * np.clip(0.5 + 0.6 * streaks(80, 33, (1.2, 22)), 0, 1)) * lid)
-    over((62, 26, 24), 0.75 * soft(lambda d: d.line([(244, 249), (480, 249)], fill=255, width=4), 1.2) * lid)       # scored line
-    over((30, 30, 34), 0.55 * soft(lambda d: d.line([(300, 262), (480, 262)], fill=255, width=3), 1.2) * lid)
+    over(STRIPE_RGB, 0.85 * soft(lambda d: d.line([(236, 249), (492, 249)], fill=255, width=14), 1.0) * lid)     # what is left of the pinstripe
+    over(STRIPE_RGB, 0.80 * soft(lambda d: d.line([(290, 281), (492, 281)], fill=255, width=8), 1.0) * lid)
     # body corner: scraped nearly black, pale brush marks mostly low down
     m = Image.new('L', (PD_W, PD_H), 0)
     ImageDraw.Draw(m).polygon([(505, 330), (640, 215), (800, 290), (810, 520), (770, 655), (505, 665)], fill=255)
@@ -843,6 +843,52 @@ def paint_damage(k):
         Vs.append(V); Fs.append(re[F] + off); off += len(V)
     V = np.vstack(Vs); F = np.vstack(Fs)
     k.add_mesh('PAINT_DAMAGE_R', V, fix_winding(V, F), k.add_material(m), transparent=1, shadows=0)
+    return {'tris': len(F)}
+
+# ------------------------------------------------------------------ 15. double pinstripe along the beltline and across the trunk
+# height of the stripe's centre line along the car (z, y): about midway between the door handles and the window sills,
+# following the beltline down towards the headlights; level across the back of the trunk
+STRIPE_Y = [(-2.60, 0.755), (-0.90, 0.755), (-0.50, 0.752), (-0.20, 0.741), (0.20, 0.731), (0.60, 0.717), (0.90, 0.700), (1.20, 0.685), (1.50, 0.650), (1.74, 0.630)]
+STRIPE_BANDS = [(0.0017, 0.0052), (-0.0055, -0.0035)]      # upper (3.5 mm) and lower (2 mm) line, relative to the centre line
+STRIPE_RGB = (56, 24, 24)
+
+def clip_band(V, F, f, lo, hi):
+    """the part of each triangle where lo <= f <= hi (f given per vertex, linear inside a triangle)"""
+    out_v = []; out_f = []; n = 0
+    for tri in F[(f[F].max(1) > lo) & (f[F].min(1) < hi)]:
+        poly = [(V[i], f[i]) for i in tri]
+        for sgn, lim in ((1.0, lo), (-1.0, -hi)):                       # keep sgn * f >= lim
+            nxt = []
+            for i in range(len(poly)):
+                (pa, fa), (pb, fb) = poly[i], poly[(i + 1) % len(poly)]; da = sgn * fa - lim; db = sgn * fb - lim
+                if da >= 0: nxt.append((pa, fa))
+                if (da >= 0) != (db >= 0):
+                    u = da / (da - db); nxt.append((pa + (pb - pa) * u, fa + (fb - fa) * u))
+            poly = nxt
+            if len(poly) < 3: break
+        if len(poly) < 3: continue
+        out_v += [p_ for p_, _ in poly]; out_f += [[n, n + i, n + i + 1] for i in range(1, len(poly) - 1)]; n += len(poly)
+    return (np.array(out_v), np.array(out_f, np.int64)) if out_v else (np.zeros((0, 11)), np.zeros((0, 3), np.int64))
+
+def pinstripe(k):
+    k.set_texture('gh_pinstripe.png', flat_texture(STRIPE_RGB))
+    mid = k.add_material(simple_material('gh_pinstripe', 'gh_pinstripe.png', 0.40, 0.45, 0.30, 40.0))
+    zs, ys = zip(*STRIPE_Y); Vs = []; Fs = []; off = 0
+    for name in ('f_fenders', 'lf_door', 'rf_door', 'rear_doors', 'r_fenders', 'trunk'):
+        n, _, M = k.find(name); w = world_pos(n, M); nr = unit(n.V[:, 3:6] @ M[:3, :3])
+        V = np.zeros((len(w), 11)); V[:, :3] = w; V[:, 3:6] = nr; V[:, 6:8] = 0.5; V[:, 8:11] = [0, 0, 1]
+        f = w[:, 1] - np.interp(w[:, 2], zs, ys)
+        fn = nr[n.F].mean(1); c = w[n.F].mean(1)
+        side = (np.abs(c[:, 0]) > 0.70) & (fn[:, 0] * np.sign(c[:, 0]) > 0.35) & (c[:, 2] < zs[-1] + 0.02)       # outer skin of the flanks
+        back = (c[:, 2] < -2.30) & (fn[:, 2] < -0.35)                                                             # rear face of trunk and corners
+        F = n.F[(side | back) & (np.abs(fn[:, 1]) < 0.85)]
+        for lo, hi in STRIPE_BANDS:
+            v_, f_ = clip_band(V, F, f, lo, hi)
+            if len(v_): Vs.append(v_); Fs.append(f_ + off); off += len(v_)
+    V = np.vstack(Vs); F = np.vstack(Fs)
+    V[:, 3:6] = unit(V[:, 3:6]); V[:, :3] += V[:, 3:6] * 0.0008
+    keep = (V[F][:, :, 2] <= zs[-1]).all(1); F = F[keep]
+    k.add_mesh('PINSTRIPE', V, fix_winding(V, F), mid, shadows=0)
     return {'tris': len(F)}
 
 def build(src, out):

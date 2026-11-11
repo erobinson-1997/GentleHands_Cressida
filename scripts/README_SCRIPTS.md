@@ -51,7 +51,7 @@ California plate with a made-up, mosaic-censored number (`PLATE_TEXT`, `PLATE_MO
 ahead of the fuel door, worn mirrors, the TIRE STREETS sticker on the left rear door glass, a faint hood fade (also
 written to `skins/silver_176/carpaint_diffuse.dds`), door number panels (`RACE_NUMBER`), the US-style front bumper
 without the lip/valance, the panel under it with two amber lamps, the black grille with crest and TOYOTA badge, clear
-headlight lenses with amber corners, and the broken outer end of the right tail light (a crack across the red outer sheet, two pieces of it missing so the clear mosaic plastic behind shows, scrape marks), and the paint rubbed through to primer and bare metal on the trunk lid and body corner above it.
+headlight lenses with amber corners, and the broken outer end of the right tail light (a crack across the red outer sheet, two pieces of it missing so the clear mosaic plastic behind shows, scrape marks), and the paint rubbed through to primer and bare metal on the trunk lid and body corner above it, and the dark double pinstripe along the beltline and across the back of the trunk (`STRIPE_Y`, `STRIPE_BANDS`).
 
 - kn5io.py     full kn5 load/edit/save (round trip is byte-identical); mesh split, subdivide-safe deform helpers
 - preview.py   software render of a kn5 for a quick look without the game: `python scripts/preview.py <kn5> <out_dir> [view ...]`
