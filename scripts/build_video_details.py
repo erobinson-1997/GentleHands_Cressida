@@ -791,24 +791,25 @@ def paint_damage_image():
     grain = 0.85 + 0.30 * noise((PD_H, PD_W), 3, 21)
     primer = (188, 190, 196); metal = (74, 76, 82); lid = xx < 492
     # trunk lid: sanded oval
-    d = np.sqrt(((xx - 300) / 150) ** 2 + ((yy - 300) / 100) ** 2) + 0.10 * (noise((PD_H, PD_W), 30, 22) - 0.5) * 2
-    over(metal, 0.80 * np.clip((0.86 - d) / 0.16, 0, 1) * lid)
+    d = np.sqrt(((xx - 300) / 150) ** 2 + ((yy - 300) / 100) ** 2) + 0.30 * (noise((PD_H, PD_W), 16, 22) - 0.5) * 2
+    blotch = np.clip(0.25 + 1.3 * noise((PD_H, PD_W), 20, 25), 0, 1)                                          # uneven, not a neat ring
+    over(metal, 0.60 * np.clip((0.86 - d) / 0.30, 0, 1) * lid)
     over((128, 92, 76), 0.35 * np.exp(-(((xx - 372) / 50) ** 2 + ((yy - 228) / 22) ** 2)) * lid)                    # a touch of rust
-    over(primer, 0.88 * np.exp(-((d - 0.90) / 0.20) ** 2) * grain * lid)
+    over(primer, 0.85 * np.exp(-((d - 0.90) / 0.32) ** 2) * blotch * grain * lid)
     over(primer, 0.55 * np.exp(-(((xx - 215) / 60) ** 2 + ((yy - 345) / 45) ** 2)) * grain * lid)                   # thicker on the inboard side
     # trunk lid: rubbed streak down its outer edge to the lamp
     cx = np.interp(yy, [330, 480, 640], [420, 452, 470]); wd = np.interp(yy, [330, 480, 640], [34, 22, 14])
     over(primer, 0.80 * np.exp(-((xx - cx) / wd) ** 2) * np.clip((yy - 300) / 60, 0, 1) * np.clip((660 - yy) / 40, 0, 1) * grain * lid)
     # body corner: scraped dark, pale brush marks
     m = Image.new('L', (PD_W, PD_H), 0)
-    ImageDraw.Draw(m).polygon([(520, 330), (640, 215), (900, 300), (930, 520), (860, 640), (520, 650)], fill=255)
-    m = np.asarray(m.filter(ImageFilter.GaussianBlur(14))).astype(float) / 255 * ~lid
-    over((34, 34, 38), 0.90 * m)
+    ImageDraw.Draw(m).polygon([(520, 330), (640, 215), (800, 290), (810, 520), (770, 640), (520, 650)], fill=255)
+    m = np.asarray(m.filter(ImageFilter.GaussianBlur(24))).astype(float) / 255 * ~lid
+    over((30, 30, 34), 0.94 * np.clip(m * 1.25, 0, 1))
     s1 = streaks(32, 23); s2 = streaks(18, 24, (3.0, 40))
     sw = np.exp(-(((xx - 640) / 150) ** 2 + ((yy - 520) / 120) ** 2)) + 0.9 * np.exp(-(((xx - 800) / 110) ** 2 + ((yy - 330) / 70) ** 2)) \
         + 0.5 * np.exp(-(((xx - 850) / 60) ** 2 + ((yy - 560) / 60) ** 2))
-    over((206, 210, 218), 0.85 * m * np.clip(sw, 0, 1) * np.clip(0.30 + 0.55 * s1, 0, 1) ** 1.2 * 1.5)
-    over((150, 154, 162), 0.45 * m * np.clip(0.10 + 0.5 * s2, 0, 1))
+    over((206, 210, 218), 0.85 * m * np.clip(sw, 0, 1) * np.clip(0.08 + 0.50 * s1, 0, 1) ** 1.3 * 1.2)
+    over((150, 154, 162), 0.30 * m * np.clip(0.5 * s2, 0, 1))
     al = gaussian_filter(al, 1.0)
     return Image.fromarray(np.dstack([np.clip(rgb, 0, 255), np.clip(al, 0, 1) * 255]).astype(np.uint8), 'RGBA')
 
