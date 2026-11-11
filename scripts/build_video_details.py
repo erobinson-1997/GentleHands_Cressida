@@ -14,7 +14,7 @@ from scipy.ndimage import gaussian_filter
 import config
 from kn5io import Kn5, Material, Node, world_pos, deform, split_mesh, update_bounds, unit
 
-STEPS = ['wheels_black', 'mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade', 'door_numbers', 'front_end', 'lower_panel', 'grille', 'clear_lamps']
+STEPS = ['wheels_black', 'mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade', 'door_numbers', 'front_end', 'lower_panel', 'grille', 'clear_lamps', 'taillight_damage']
 PLATE_TEXT = '8XKQ407'          # made-up number (not the real plate); set to None to keep the original mod's plate
 PLATE_MOSAIC = True             # pixelate the number like a censored photo
 FRONT_PLATE = True              # hangs below the front bumper
@@ -630,6 +630,70 @@ def clear_lamps(k):
     mid = k.add_material(m)
     for name in ('headlight1', 'headlights_part006'): k.find(name)[0].mat = mid
     return {'texels': int(reg.sum())}
+
+# ------------------------------------------------------------------ 13. right tail light: smashed outer end, patched with red lens tape
+TAIL_V = (-0.60, -0.10)         # span of the damage decal along the lamp, in the lens' own v coordinate (x -0.50 .. -0.775)
+TAIL_U = (0.349, 0.618)         # top of the red lens .. bottom of the amber lens
+
+def taillight_image():
+    """1024x512, transparent except for the damage. Left = towards the plate, right = outer end; the top 331 rows are
+    the red lens, the rest the amber one."""
+    W, H, RED = 1024, 512, 331; rng = np.random.default_rng(83)
+    im = Image.new('RGBA', (W, H), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
+    # red repair tape over the broken end, stuck on in two overlapping pieces
+    tape = [(532, 0), (1006, 0), (1006, RED + 6), (760, RED + 9), (742, RED - 2), (560, RED + 4), (548, 250), (520, 140)]
+    d.polygon(tape, fill=(170, 16, 34, 255))
+    d.polygon([(468, 14), (640, 6), (668, 150), (720, 300), (610, RED + 2), (500, 290), (455, 150)], fill=(186, 42, 62, 255))
+    m = np.asarray(im)[:, :, 3] > 0
+    a = np.asarray(im).astype(float)
+    wr = noise((H, W), (3, 14), 5) * 0.6 + noise((H, W), (10, 3), 6) * 0.4            # wrinkles: streaky light/dark
+    wr = (wr - wr.mean()) / wr.std()
+    a[:, :, :3] = np.clip(a[:, :, :3] * (1 + 0.16 * wr[:, :, None]) + 26 * np.clip(wr - 1.1, 0, 2)[:, :, None], 0, 255)
+    a[~m] = 0; im = Image.fromarray(a.astype(np.uint8), 'RGBA'); d = ImageDraw.Draw(im)
+    for _ in range(26):                                                                  # creases in the tape
+        x = rng.uniform(470, 1000); y = rng.uniform(5, RED - 5); L = rng.uniform(20, 90); an = rng.uniform(0.9, 2.0)
+        q = (x + L * np.cos(an), y + L * np.sin(an))
+        if m[int(np.clip(q[1], 0, H - 1)), int(np.clip(q[0], 0, W - 1))] and m[int(y), int(x)]:
+            c = (226, 120, 136, 255) if rng.random() < 0.5 else (112, 8, 22, 255); d.line([(x, y), q], fill=c, width=1)
+    # two places where the lens is gone and the white reflector shows
+    def bare(poly):
+        g = Image.new('RGBA', (W, H), (0, 0, 0, 0)); gd = ImageDraw.Draw(g); gd.polygon(poly, fill=(226, 226, 230, 255))
+        ga = np.asarray(g).copy(); yy, xx = np.mgrid[0:H, 0:W]; on = ga[:, :, 3] > 0
+        ga[on & ((xx % 5 == 0) | (yy % 5 == 0))] = (186, 188, 196, 255); im.alpha_composite(Image.fromarray(ga, 'RGBA'))
+        ImageDraw.Draw(im).line(poly + [poly[0]], fill=(70, 6, 14, 255), width=3)
+    bare([(612, 34), (694, 30), (700, 150), (690, 252), (618, 246), (608, 140)])
+    bare([(764, 36), (905, 48), (900, 120), (868, 238), (820, 150)])
+    d = ImageDraw.Draw(im)
+    d.polygon([(688, 250), (724, 244), (738, 262), (716, 278), (694, 270)], fill=(14, 6, 6, 255))   # the hole at the impact
+    # cracks running out from the impact, into the unbroken lens and the amber
+    dark = (58, 6, 12, 255)
+    for line, w in (([(716, 270), (640, 300), (560, 322), (470, 300), (392, 322), (300, RED)], 3),
+                    ([(470, 300), (420, 190), (446, 90), (462, 0)], 3), ([(392, 322), (250, 300), (120, 312), (0, 306)], 2),
+                    ([(420, 190), (330, 150), (240, 160)], 1), ([(716, 278), (700, 360), (712, 430)], 2),
+                    ([(700, 360), (640, 392)], 1), ([(738, 262), (800, RED), (850, 380), (842, 470)], 2),
+                    ([(850, 380), (930, 400), (1000, 452)], 1), ([(560, 322), (548, 400), (575, 512)], 1)):
+        j = [(x + rng.uniform(-3, 3), y + rng.uniform(-3, 3)) for x, y in line]; j[0] = line[0]
+        d.line(j, fill=dark, width=w, joint='curve')
+        d.line([(x + w, y - 1) for x, y in j], fill=(238, 196, 190, 150) if w > 1 else dark, width=1)   # bright edge of the crack
+    return im
+
+def taillight_damage(k):
+    k.set_texture('gh_taillight_damage.png', png_bytes(taillight_image()))
+    m = simple_material('gh_taillight_damage', 'gh_taillight_damage.png', 0.42, 0.45, 0.45, 35.0, shader='ksPerPixelAT', alpha_ref=0.5)
+    m.alpha_tested = 1; mid = k.add_material(m)
+    Vs = []; Fs = []; off = 0
+    for name in ('Object036', 'signal_r_glass'):                 # red and amber lenses; left and right share one UV layout
+        n, _, M = k.find(name); w = world_pos(n, M); uv = n.V[:, 6:8]
+        nr = unit(n.V[:, 3:6] @ M[:3, :3]); nr *= np.sign(nr @ np.array([-0.3, 0.0, -1.0]) + 1e-9)[:, None]
+        ok = (w[:, 0] < 0) & (uv[:, 1] > TAIL_V[0] - 0.02) & (uv[:, 1] < TAIL_V[1] + 0.02)
+        F = n.F[ok[n.F].all(1)]; used = np.unique(F); re = np.full(len(w), -1); re[used] = np.arange(len(used))
+        V = np.zeros((len(used), 11)); V[:, :3] = w[used] + nr[used] * 0.0012; V[:, 3:6] = nr[used]
+        V[:, 6] = (uv[used, 1] - TAIL_V[0]) / (TAIL_V[1] - TAIL_V[0]); V[:, 7] = (uv[used, 0] - TAIL_U[0]) / (TAIL_U[1] - TAIL_U[0])
+        V[:, 8:11] = [-1, 0, 0]
+        Vs.append(V); Fs.append(re[F] + off); off += len(V)
+    V = np.vstack(Vs); F = np.vstack(Fs)
+    k.add_mesh('TAILLIGHT_DAMAGE_R', V, fix_winding(V, F), mid, shadows=0)
+    return {'tris': len(F)}
 
 def build(src, out):
     k = Kn5.load(src); info = {}
