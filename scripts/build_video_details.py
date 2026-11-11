@@ -15,7 +15,7 @@ import config
 from kn5io import Kn5, Material, Node, world_pos, deform, split_mesh, update_bounds, unit, weld_normals
 
 STEPS = ['wheels_black', 'mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade', 'door_numbers', 'front_end', 'lower_panel', 'grille', 'clear_lamps', 'taillight_damage', 'trunk_face', 'pinstripe', 'paint_damage',
-         'rear_seat_delete', 'bucket_seat', 'shifter', 'floor_mat']
+         'rear_seat_delete', 'bucket_seat', 'shifter', 'floor_mat', 'head_unit']
 PLATE_TEXT = '8XKQ407'          # made-up number (not the real plate); set to None to keep the original mod's plate
 PLATE_MOSAIC = True             # pixelate the number like a censored photo
 FRONT_PLATE = True              # hangs below the front bumper
@@ -1218,6 +1218,80 @@ def floor_mat(k):
     k.set_texture('gh_floor_mat.png', png_bytes(floor_mat_image()))
     k.add_mesh('FLOOR_MAT', *b.done(), k.add_material(simple_material('gh_floor_mat', 'gh_floor_mat.png', 0.40, 0.45, 0.03, 5.0)), shadows=0)
     return {}
+
+# ---- aftermarket single-DIN head unit with an open pocket below it, in place of the stock radio / cassette deck
+HU_X = (0.077, -0.127); HU_Y = (0.598, 0.493)        # the double-DIN opening in the centre stack: left/right edge, top/bottom edge
+HU_UNIT = (0.066, -0.116, 0.595, 0.547)              # the head unit's face inside it: left, right, top, bottom
+HU_POCKET = (0.062, -0.112, 0.543, 0.499)
+
+def hu_point(x, y, d):
+    """a point d metres in front of the centre stack's face (which leans back towards the top)"""
+    n = np.array([0.0, 0.196, -1.0]); n /= np.linalg.norm(n)
+    return np.array([x, y, 0.435 + 0.196 * (y - 0.497)]) + n * d
+
+def hu_uv(x, y):
+    return ((HU_X[0] - x) / (HU_X[0] - HU_X[1]), 0.9 * (HU_Y[0] - y) / (HU_Y[0] - HU_Y[1]))
+
+def head_unit_image(W=1024, H=512, seed=71):
+    PH = int(H * 0.9); yy, xx = np.mgrid[0:H, 0:W].astype(np.float64)
+    img = np.empty((H, W, 3)); img[:] = (20, 20, 22); img *= (0.85 + 0.3 * noise((H, W), 1.0, seed))[..., None]       # satin black surround
+    def over(rgb, a): img[:] = img * (1 - a[..., None]) + np.array(rgb, float) * a[..., None]
+    def mask(fn, blur=0.0):
+        im = Image.new('L', (W, H), 0); fn(ImageDraw.Draw(im))
+        return np.asarray(im.filter(ImageFilter.GaussianBlur(blur)) if blur else im, np.float64) / 255
+    def px(x, y): u, v = hu_uv(x, y); return u * W, v * H
+    (ux0, uy0), (ux1, uy1) = px(HU_UNIT[0], HU_UNIT[2]), px(HU_UNIT[1], HU_UNIT[3]); uw, uh = ux1 - ux0, uy1 - uy0
+    R = lambda a, b, c, d: (ux0 + a * uw, uy0 + b * uh, ux0 + c * uw, uy0 + d * uh)
+    # the unit: gloss black face, a lighter bevel along its top edge, a reflection running across it
+    over((7, 7, 9), mask(lambda d: d.rounded_rectangle(R(0, 0, 1, 1), radius=10, fill=255)))
+    over((70, 72, 78), 0.8 * mask(lambda d: d.line([(ux0 + 8, uy0 + 4), (ux1 - 8, uy0 + 4)], fill=255, width=4), 1.5))
+    over((60, 66, 80), 0.30 * mask(lambda d: d.polygon([(ux0 + 0.30 * uw, uy0), (ux0 + 0.62 * uw, uy0), (ux0 + 0.50 * uw, uy1), (ux0 + 0.18 * uw, uy1)], fill=255), 14) * mask(lambda d: d.rounded_rectangle(R(0, 0, 1, 1), radius=10, fill=255)))
+    # display window with a dim read-out
+    over((14, 17, 26), mask(lambda d: d.rounded_rectangle(R(0.30, 0.20, 0.80, 0.62), radius=6, fill=255)))
+    f1 = font(['arialbd.ttf'], int(uh * 0.20)); f2 = font(['arial.ttf'], int(uh * 0.11)); f3 = font(['arialbd.ttf'], int(uh * 0.17))
+    over((70, 120, 170), 0.55 * mask(lambda d: (d.text((ux0 + 0.34 * uw, uy0 + 0.30 * uh), 'BT AUDIO', font=f1, fill=255), d.text((ux0 + 0.66 * uw, uy0 + 0.30 * uh), '12:00', font=f1, fill=255)), 0.6))
+    over((205, 205, 210), 0.9 * mask(lambda d: d.text((ux0 + 0.52 * uw, uy0 + 0.035 * uh), 'SONY', font=f3, fill=255), 0.4))
+    # buttons: a row of small keys under the display, source/eject at the left, release key, aux jack and USB flap at the right
+    keys = [R(0.30 + 0.085 * j, 0.72, 0.30 + 0.085 * j + 0.072, 0.92) for j in range(6)] + [R(0.03, 0.08, 0.10, 0.30), R(0.87, 0.10, 0.97, 0.40)]
+    over((30, 31, 35), mask(lambda d: [d.rounded_rectangle(b_, radius=5, fill=255) for b_ in keys]))
+    over((85, 87, 94), 0.7 * mask(lambda d: [d.line([(b_[0] + 4, b_[1] + 2), (b_[2] - 4, b_[1] + 2)], fill=255, width=2) for b_ in keys], 0.8))
+    over((170, 170, 176), 0.8 * mask(lambda d: [d.text((b_[0] + 9, b_[1] + 0.045 * uh), str(j + 1), font=f2, fill=255) for j, b_ in enumerate(keys[:6])], 0.3))
+    over((2, 2, 3), mask(lambda d: d.ellipse(R(0.845, 0.62, 0.845 + 0.20 * uh / uw, 0.82), fill=255), 0.8))
+    over((120, 122, 128), 0.8 * mask(lambda d: d.ellipse(R(0.845, 0.62, 0.845 + 0.20 * uh / uw, 0.82), outline=255, width=3), 0.8))
+    over((26, 27, 30), mask(lambda d: d.rounded_rectangle(R(0.90, 0.56, 0.975, 0.90), radius=4, fill=255)))
+    # volume knob (the cap of the modelled knob uses this part of the picture)
+    kx, ky, kr = ux0 + 0.20 * uw, uy0 + 0.55 * uh, 0.27 * uh
+    dk = np.hypot(xx - kx, yy - ky); ang = np.arctan2(yy - ky, xx - kx)
+    over((0, 0, 0), 0.7 * np.clip(1 - (dk - kr) / 14, 0, 1) * (dk > kr))                                              # shadow round it
+    over((150, 152, 158), (dk <= kr) * 1.0); img[dk <= kr] *= (0.55 + 0.45 * np.cos(2 * ang[dk <= kr] + 0.6) ** 2)[..., None]   # brushed ring
+    over((16, 16, 18), (dk <= kr * 0.70) * 1.0); over((90, 92, 100), 0.6 * np.exp(-(((xx - kx + 0.25 * kr) / (0.22 * kr)) ** 2 + ((yy - ky + 0.28 * kr) / (0.16 * kr)) ** 2)) * (dk <= kr * 0.70))
+    # the open pocket: dark inside, its floor catching a little light, a rounded lip
+    (qx0, qy0), (qx1, qy1) = px(HU_POCKET[0], HU_POCKET[2]), px(HU_POCKET[1], HU_POCKET[3])
+    pocket = mask(lambda d: d.rounded_rectangle((qx0, qy0, qx1, qy1), radius=16, fill=255), 1.0)
+    over((4, 4, 5), pocket); over((40, 41, 45), 0.75 * pocket * np.clip((yy - (qy0 + 0.62 * (qy1 - qy0))) / (0.38 * (qy1 - qy0)), 0, 1) ** 1.5)
+    over((58, 60, 66), 0.8 * mask(lambda d: d.rounded_rectangle((qx0, qy0, qx1, qy1), radius=16, outline=255, width=4), 1.2))
+    img[PH:, :W // 2] = (150, 152, 158); img[PH:, W // 2:] = (9, 9, 11)                                               # swatches: knob side, case sides
+    return Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), 'RGB')
+
+def head_unit(k):
+    inside = lambda c: HU_X[1] - 0.005 < c[0] < HU_X[0] + 0.005 and HU_Y[1] - 0.005 < c[1] < HU_Y[0] + 0.005
+    gone = drop_components(k, 'Object022_002_002', inside) + drop_components(k, 'Cylinder001_002_002', inside) + drop_components(k, 'Object027_002_002', lambda c: True)
+    n = np.array([0.0, 0.196, -1.0]); n /= np.linalg.norm(n); b = Builder(); black = (0.75, 0.95)
+    def face(x0, x1, y0, y1, d): b.poly([hu_point(x0, y0, d), hu_point(x1, y0, d), hu_point(x1, y1, d), hu_point(x0, y1, d)], n, [hu_uv(x0, y0), hu_uv(x1, y0), hu_uv(x1, y1), hu_uv(x0, y1)])
+    def rim(x0, x1, y0, y1, d0, d1):
+        for (xa, ya), (xb, yb), nr in (((x0, y0), (x1, y0), (0, 1, 0)), ((x1, y0), (x1, y1), (-1, 0, 0)), ((x1, y1), (x0, y1), (0, -1, 0)), ((x0, y1), (x0, y0), (1, 0, 0))):
+            b.poly([hu_point(xa, ya, d0), hu_point(xb, yb, d0), hu_point(xb, yb, d1), hu_point(xa, ya, d1)], nr, [black] * 4)
+    face(HU_X[0], HU_X[1], HU_Y[0], HU_Y[1], 0.007); rim(HU_X[0], HU_X[1], HU_Y[0], HU_Y[1], -0.004, 0.007)          # surround plate with the pocket
+    face(*HU_UNIT, 0.015); rim(*HU_UNIT, 0.007, 0.015)                                                                # the unit standing proud of it
+    cx = HU_UNIT[0] + 0.20 * (HU_UNIT[1] - HU_UNIT[0]); cy = HU_UNIT[2] + 0.55 * (HU_UNIT[3] - HU_UNIT[2]); r = 0.27 * (HU_UNIT[2] - HU_UNIT[3])
+    th = np.linspace(0, 2 * np.pi, 19)[:-1]; up = np.array([0.0, 1.0, 0.196]); up /= np.linalg.norm(up); ring = [(cx + r * np.cos(a), cy + r * np.sin(a)) for a in th]
+    b.poly([hu_point(x, y, 0.027) for x, y in ring], n, [hu_uv(x, y) for x, y in ring])                              # volume knob: cap and side
+    for (xa, ya), (xb, yb), a in zip(ring, ring[1:] + ring[:1], th + np.pi / 18):
+        b.poly([hu_point(xa, ya, 0.015), hu_point(xb, yb, 0.015), hu_point(xb, yb, 0.027), hu_point(xa, ya, 0.027)], np.array([np.cos(a), 0, 0]) + up * np.sin(a), [(0.25, 0.95)] * 4)
+    k.set_texture('gh_head_unit.png', png_bytes(head_unit_image()))
+    V, F = b.done()
+    k.add_mesh('HEAD_UNIT', V, F, k.add_material(simple_material('gh_head_unit', 'gh_head_unit.png', 0.40, 0.45, 0.55, 60.0)), shadows=0)
+    return {'stock_radio_tris_removed': gone, 'tris': len(F)}
 
 def build(src, out):
     k = Kn5.load(src); info = {}
