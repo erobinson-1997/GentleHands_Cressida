@@ -776,8 +776,9 @@ PD_BOX = (-0.55, -0.80, 0.82, 0.63)      # decal sheet seen from behind: x at it
 PD_W, PD_H = 1024, 768
 
 def paint_damage_image():
-    """trunk lid (left of px 500): an oval sanded through to primer with dark bare metal in the middle, and a rubbed streak
-    down the lid's edge. Body corner (right of px 500): scraped dark, with pale brushed marks across it."""
+    """trunk lid (left of px 492): three gouges through the paint (a bar on top, a curved stroke below it, a short bar by
+    the lid's edge), each smeared away towards the car's centre. Body corner (right of px 492): scraped nearly black,
+    pale brushed marks mostly in its lower half. Traced from the owner's marked-up photo: 1 photo px = 1.38 px here."""
     yy, xx = np.mgrid[0:PD_H, 0:PD_W].astype(float); rgb = np.zeros((PD_H, PD_W, 3)); al = np.zeros((PD_H, PD_W))
     def over(col, a):
         nonlocal rgb, al
@@ -790,27 +791,37 @@ def paint_damage_image():
         return (n - n.mean()) / n.std()
     grain = 0.85 + 0.30 * noise((PD_H, PD_W), 3, 21)
     primer = (188, 190, 196); metal = (74, 76, 82); lid = xx < 492
-    # trunk lid: sanded oval
-    d = np.sqrt(((xx - 300) / 150) ** 2 + ((yy - 300) / 100) ** 2) + 0.30 * (noise((PD_H, PD_W), 16, 22) - 0.5) * 2
-    blotch = np.clip(0.25 + 1.3 * noise((PD_H, PD_W), 20, 25), 0, 1)                                          # uneven, not a neat ring
-    over(metal, 0.60 * np.clip((0.86 - d) / 0.30, 0, 1) * lid)
-    over((128, 92, 76), 0.35 * np.exp(-(((xx - 372) / 50) ** 2 + ((yy - 228) / 22) ** 2)) * lid)                    # a touch of rust
-    over(primer, 0.85 * np.exp(-((d - 0.90) / 0.32) ** 2) * blotch * grain * lid)
-    over(primer, 0.55 * np.exp(-(((xx - 215) / 60) ** 2 + ((yy - 345) / 45) ** 2)) * grain * lid)                   # thicker on the inboard side
-    # trunk lid: rubbed streak down its outer edge to the lamp
-    cx = np.interp(yy, [330, 480, 640], [420, 452, 470]); wd = np.interp(yy, [330, 480, 640], [34, 22, 14])
-    over(primer, 0.80 * np.exp(-((xx - cx) / wd) ** 2) * np.clip((yy - 300) / 60, 0, 1) * np.clip((660 - yy) / 40, 0, 1) * grain * lid)
-    # body corner: scraped dark, pale brush marks
+    # trunk lid: the deepest parts of the scrape...
+    core = Image.new('L', (PD_W, PD_H), 0); cd = ImageDraw.Draw(core)
+    cd.line([(264, 182), (350, 178), (444, 182)], fill=255, width=30, joint='curve')
+    cd.line([(161, 299), (186, 322), (216, 340), (271, 357), (354, 361)], fill=255, width=34, joint='curve')
+    for x_, y_, r_ in ((264, 182, 15), (444, 182, 15), (161, 299, 17), (354, 361, 17)): cd.ellipse((x_ - r_, y_ - r_, x_ + r_, y_ + r_), fill=255)
+    cd.rounded_rectangle((402, 360, 486, 390), radius=14, fill=255)
+    core = np.asarray(core.filter(ImageFilter.GaussianBlur(6))).astype(float) / 255
+    core = np.clip(core * 1.5 * (0.35 + 1.0 * noise((PD_H, PD_W), (2.5, 12), 31)) - 0.12, 0, 1)                             # worn unevenly, along the stroke
+    # ...and the paint dragged off beside them: each mark trails away to the left, fading, in fine streaks
+    L = 260; kern = np.exp(-np.arange(L) / 48.0); kern /= kern.sum(); wide = gaussian_filter(core, (8, 0))
+    smear = np.stack([np.convolve(row, kern, mode='full')[L - 1:] for row in wide]) * 2.2 * np.clip(xx / 90, 0, 1)            # one-sided: pulls each row leftwards
+    fine = np.clip(0.70 + 0.40 * streaks(0, 32, (1.2, 34)), 0, 1)
+    haze = np.exp(-(((xx - 330) / 190) ** 2 + ((yy - 275) / 125) ** 2) ** 2)
+    over((150, 154, 162), 0.22 * haze * grain * lid)
+    over((182, 185, 192), 0.80 * np.clip(smear, 0, 1) ** 0.8 * fine * lid)
+    over((204, 204, 208), 0.92 * core * lid)
+    over((150, 112, 92), 0.40 * core * np.exp(-(((xx - 400) / 60) ** 2 + ((yy - 180) / 22) ** 2)) * lid)   # a little rust in the top bar
+    # a few fine scratches down the lid's outer edge, below the gouges
+    edge = np.exp(-(((xx - 468) / 20) ** 2)) * np.clip((yy - 385) / 30, 0, 1) * np.clip((560 - yy) / 90, 0, 1)
+    over((186, 188, 194), 0.55 * edge * np.clip(0.9 * streaks(78, 33, (0.8, 16)), 0, 1) * lid)
+    # body corner: scraped nearly black, pale brush marks mostly low down
     m = Image.new('L', (PD_W, PD_H), 0)
-    ImageDraw.Draw(m).polygon([(520, 330), (640, 215), (800, 290), (810, 520), (770, 640), (520, 650)], fill=255)
-    m = np.asarray(m.filter(ImageFilter.GaussianBlur(24))).astype(float) / 255 * ~lid
-    over((30, 30, 34), 0.94 * np.clip(m * 1.25, 0, 1))
-    s1 = streaks(32, 23); s2 = streaks(18, 24, (3.0, 40))
-    sw = np.exp(-(((xx - 640) / 150) ** 2 + ((yy - 520) / 120) ** 2)) + 0.9 * np.exp(-(((xx - 800) / 110) ** 2 + ((yy - 330) / 70) ** 2)) \
-        + 0.5 * np.exp(-(((xx - 850) / 60) ** 2 + ((yy - 560) / 60) ** 2))
-    over((206, 210, 218), 0.85 * m * np.clip(sw, 0, 1) * np.clip(0.08 + 0.50 * s1, 0, 1) ** 1.3 * 1.2)
-    over((150, 154, 162), 0.30 * m * np.clip(0.5 * s2, 0, 1))
-    al = gaussian_filter(al, 1.0)
+    ImageDraw.Draw(m).polygon([(505, 330), (640, 215), (800, 290), (810, 520), (770, 655), (505, 665)], fill=255)
+    m = np.asarray(m.filter(ImageFilter.GaussianBlur(16))).astype(float) / 255 * ~lid
+    over((16, 16, 18), 0.98 * np.clip(m * 1.5, 0, 1))
+    s1 = streaks(24, 23, (1.4, 30)); s2 = streaks(14, 24, (3.0, 40))
+    sw = np.exp(-(((xx - 620) / 120) ** 2 + ((yy - 560) / 85) ** 2)) + 0.75 * np.exp(-(((xx - 745) / 70) ** 2 + ((yy - 470) / 60) ** 2)) \
+        + 0.25 * np.exp(-(((xx - 700) / 90) ** 2 + ((yy - 320) / 50) ** 2))
+    over((200, 205, 214), 0.90 * m * np.clip(sw, 0, 1) * np.clip(0.15 + 0.55 * s1, 0, 1) ** 1.2 * 1.3)
+    over((120, 124, 132), 0.22 * m * np.clip(0.5 * s2, 0, 1))
+    al = gaussian_filter(al, 0.6)
     return Image.fromarray(np.dstack([np.clip(rgb, 0, 255), np.clip(al, 0, 1) * 255]).astype(np.uint8), 'RGBA')
 
 def paint_damage(k):
