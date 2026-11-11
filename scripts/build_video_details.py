@@ -677,28 +677,37 @@ def tail_inside_images():
     return Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), 'RGB'), Image.fromarray((nm * 255).astype(np.uint8), 'RGB')
 
 def tail_crack_image():
-    """lies on the red sheet and the amber lens; transparent except for the crack, the white scrape marks on the pieces
-    of red sheet around the holes, and the bright broken edges"""
+    """lies on the red sheet and the amber lens; transparent except for the cracks and the bright broken edges"""
     rng = np.random.default_rng(84); im = Image.new('RGBA', (TW, TH), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
-    dark = (40, 5, 9, 255); lightc = (240, 205, 200, 255)
-    hm = Image.new('L', (TW, TH), 0); ImageDraw.Draw(hm).polygon(TAIL_HOLE, fill=255)
-    hole = np.asarray(hm.filter(ImageFilter.MaxFilter(5))) > 0
-    # scrapes: between the crack and the first hole, on the shard between the holes, and smeared along the joint below
-    for cx, cy, sx, sy, cnt, an0 in ((585, 185, 30, 62, 520, -0.45), (712, 190, 9, 62, 150, -1.2), (640, 345, 50, 12, 220, -0.2), (800, 290, 14, 22, 50, -1.0)):
-        for _ in range(cnt * 2):
-            x = tail_px([(rng.normal(cx, sx), 0)])[0][0]; y = rng.normal(cy, sy); L = rng.uniform(8, 44); an = rng.normal(an0, 0.2)
-            q = (x + L * np.cos(an), y + L * np.sin(an)); g = rng.uniform(0.35, 1.0)
-            if not (0 <= x < TW and 0 <= y < TH and 0 <= q[0] < TW and 0 <= q[1] < TH) or hole[int(y), int(x)] or hole[int(q[1]), int(q[0])]: continue
-            if np.interp(y, [p_[1] for p_ in TAIL_CRACK[:4]], [p_[0] for p_ in TAIL_CRACK[:4]]) > x and y < 300: continue   # inboard of the crack
-            d.line([(x, y), q], fill=(int(150 + 95 * g), int(40 + 190 * g), int(55 + 180 * g), 255), width=int(rng.integers(1, 3)))
-    side = [([(501, 249), (478, 240), (462, 258)], 1), ([(690, 342), (686, 392), (692, 432)], 2), ([(686, 392), (664, 410)], 1),
-            ([(730, 340), (738, 420), (724, 512)], 2), ([(738, 420), (762, 450)], 1), ([(725, 309), (745, 318), (765, 300), (790, 270)], 2)]
-    for line, w in [(TAIL_CRACK, 4), ([(784, 331), (700, 325), (610, 334)], 1)] + [(tail_px(l), w + (w > 1)) for l, w in side]:
+    dark = (24, 3, 6, 255); lightc = (246, 214, 208, 255)
+    side = [([(501, 249), (478, 240), (462, 258)], 3), ([(690, 342), (686, 392), (692, 432)], 4), ([(686, 392), (664, 410)], 3),
+            ([(730, 340), (738, 420), (724, 512)], 4), ([(738, 420), (762, 450)], 3), ([(725, 309), (745, 318), (765, 300), (790, 270)], 4)]
+    for line, w in [(TAIL_CRACK, 7), ([(784, 331), (700, 325), (610, 334)], 3)] + [(tail_px(l), w) for l, w in side]:
         j = [(x + rng.uniform(-2, 2), y + rng.uniform(-2, 2)) for x, y in line]; j[0] = line[0]
         d.line(j, fill=dark, width=w, joint='curve')
-        if w > 1: d.line([(x + 1, y - w) for x, y in j], fill=lightc, width=1)
+        d.line([(x + 1, y - w / 2 - 1) for x, y in j], fill=lightc, width=2 if w > 3 else 1, joint='curve')   # light catching the edge
     d.line(TAIL_HOLE + TAIL_HOLE[:1], fill=lightc, width=3, joint='curve')                           # broken edge of the red sheet
     return im
+
+def tail_scuff_image():
+    """soft white scrape marks (alpha-blended): on the piece of red sheet between the crack and the first hole, on the
+    shard between the holes, and smeared along the red/amber joint below"""
+    yy, xx = np.mgrid[0:TH, 0:TW].astype(float); al = np.zeros((TH, TW))
+    def streaks(angle, seed, sig=(1.6, 22)):
+        n = Image.fromarray((noise((TH * 2, TH * 2), sig, seed) * 255).astype(np.uint8)).rotate(angle, resample=Image.BICUBIC)
+        n = np.asarray(n.crop((TH // 2, TH // 2, TH * 3 // 2, TH * 3 // 2))).astype(float) / 255
+        n = np.tile(n, (1, TW // TH)); return (n - n.mean()) / n.std()
+    for cx, cy, rx, ry, angle, seed, k_ in ((1290, 175, 125, 125, 24, 11, 0.95), (1330, 268, 110, 45, 12, 12, 1.0), (1546, 185, 34, 120, 68, 13, 1.0),
+                                              (1400, 338, 190, 20, 4, 14, 0.9), (1730, 288, 42, 34, 60, 15, 0.8)):
+        blob = np.exp(-(((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2) * 1.3); s_ = streaks(angle, seed)
+        al = np.maximum(al, k_ * blob * np.clip(0.35 + 0.55 * s_, 0, 1) ** 1.3 * 1.6)
+    hm = Image.new('L', (TW, TH), 0); ImageDraw.Draw(hm).polygon(TAIL_HOLE, fill=255)
+    al[np.asarray(hm.filter(ImageFilter.MaxFilter(5))) > 0] = 0
+    cx_ = np.interp(yy[:, 0], [p_[1] for p_ in TAIL_CRACK[:4]], [p_[0] for p_ in TAIL_CRACK[:4]])        # nothing inboard of the crack
+    al *= np.clip((xx - cx_[:, None] - 4) / 14, 0, 1) ** (yy < 300)
+    al = gaussian_filter(np.clip(al, 0, 0.92), 0.8)
+    rgb = np.dstack([np.full((TH, TW), v) for v in (242.0, 228, 230)])
+    return Image.fromarray(np.dstack([rgb, al * 255]).astype(np.uint8), 'RGBA')
 
 def subdivide_cut(V, F, st_of, inside, keep_inside=False, levels=4):
     """drop the triangles inside the hole (or keep only those), after splitting the ones that straddle its outline
@@ -743,20 +752,23 @@ def taillight_damage(k):
     lens.V = V.astype(lens.V.dtype); lens.F = F.astype(lens.F.dtype); update_bounds(lens)
     bump, _, Mb = k.find('headlights_part010')
     info['layer_tris_cut'] = drop_tris(bump, inside(st_of(Mb)(bump.V.astype(float)))[bump.F].all(1))
-    # 3. cracks and the bright broken edge, a hair outside the red and amber lenses
+    # 3. scrape marks (soft, alpha-blended) and, a hair further out, the cracks and bright broken edges (crisp, alpha-tested)
+    k.set_texture('gh_taillight_scuffs.png', png_bytes(tail_scuff_image()))
+    ms = simple_material('gh_taillight_scuffs', 'gh_taillight_scuffs.png', 0.50, 0.50, 0.15, 12.0, shader='ksPerPixelAT'); ms.blend = 1
     k.set_texture('gh_taillight_damage.png', png_bytes(tail_crack_image()))
     m = simple_material('gh_taillight_damage', 'gh_taillight_damage.png', 0.42, 0.45, 0.45, 35.0, shader='ksPerPixelAT', alpha_ref=0.5)
-    m.alpha_tested = 1; mid = k.add_material(m)
-    Vs = []; Fs = []; off = 0
+    m.alpha_tested = 1
+    Vs = []; Fs = []; Ns = []; off = 0
     for name in ('Object036', 'signal_r_glass'):
         n, _, M = k.find(name); w = world_pos(n, M); st = tail_st(n.V[:, 6:8])
         nr = unit(n.V[:, 3:6] @ M[:3, :3]); nr *= np.sign(nr @ np.array([-0.3, 0.0, -1.0]) + 1e-9)[:, None]
         ok = (w[:, 0] < 0) & (st[:, 0] > -0.03) & (st[:, 0] < 1.0)
         F = n.F[ok[n.F].all(1)]; used = np.unique(F); re = np.full(len(w), -1); re[used] = np.arange(len(used))
-        V = np.zeros((len(used), 11)); V[:, :3] = w[used] + nr[used] * 0.0012; V[:, 3:6] = nr[used]; V[:, 6:8] = st[used]; V[:, 8:11] = [-1, 0, 0]
+        V = np.zeros((len(used), 11)); V[:, :3] = w[used]; V[:, 3:6] = nr[used]; V[:, 6:8] = st[used]; V[:, 8:11] = [-1, 0, 0]
         Vs.append(V); Fs.append(re[F] + off); off += len(V)
-    V = np.vstack(Vs); F = np.vstack(Fs)
-    k.add_mesh('TAILLIGHT_DAMAGE_R', V, fix_winding(V, F), mid, shadows=0)
+    V = np.vstack(Vs); F = np.vstack(Fs); F = fix_winding(V, F)
+    for name, mat, out, tr in (('TAILLIGHT_SCUFFS_R', ms, 0.0010, 1), ('TAILLIGHT_DAMAGE_R', m, 0.0016, 0)):
+        W = V.copy(); W[:, :3] += W[:, 3:6] * out; k.add_mesh(name, W, F, k.add_material(mat), transparent=tr, shadows=0)
     info['crack_tris'] = len(F); return info
 
 def build(src, out):
