@@ -9,7 +9,7 @@ Each step is a function below; switch steps on/off in STEPS. World coordinates: 
 """
 import sys, os, io; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageFilter
 from scipy.ndimage import gaussian_filter
 import config
 from kn5io import Kn5, Material, Node, world_pos, deform, split_mesh, update_bounds, unit
@@ -631,69 +631,135 @@ def clear_lamps(k):
     for name in ('headlight1', 'headlights_part006'): k.find(name)[0].mat = mid
     return {'texels': int(reg.sum())}
 
-# ------------------------------------------------------------------ 13. right tail light: smashed outer end, patched with red lens tape
-TAIL_V = (-0.60, -0.10)         # span of the damage decal along the lamp, in the lens' own v coordinate (x -0.50 .. -0.775)
-TAIL_U = (0.349, 0.618)         # top of the red lens .. bottom of the amber lens
+# ------------------------------------------------------------------ 13. right tail light: outer end of the red lens broken away
+# Decal space (s, t): s runs along the lamp in the lens' own v coordinate (0 = x -0.50, 0.84 = the corner, 1 = end of the
+# wrap-around), t down it in u (0 = top of the red lens, 0.647 = red/amber joint, 1 = bottom of the amber lens).
+TAIL_V = (-0.60, -0.024)
+TAIL_U = (0.349, 0.618)
+TW, TH, TRED = 1024, 512, 331
+TAIL_HOLE = [(520, 20), (506, 150), (470, 250), (400, 310), (333, 334), (600, 342), (848, 338), (852, 60), (800, 20)]   # px
+TAIL_DEPTH = 0.004              # how far behind the lens surface the exposed inside sits
 
-def taillight_image():
-    """1024x512, transparent except for the damage. Left = towards the plate, right = outer end; the top 331 rows are
-    the red lens, the rest the amber one."""
-    W, H, RED = 1024, 512, 331; rng = np.random.default_rng(83)
-    im = Image.new('RGBA', (W, H), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
-    # red repair tape over the broken end, stuck on in two overlapping pieces
-    tape = [(532, 0), (1006, 0), (1006, RED + 6), (760, RED + 9), (742, RED - 2), (560, RED + 4), (548, 250), (520, 140)]
-    d.polygon(tape, fill=(170, 16, 34, 255))
-    d.polygon([(468, 14), (640, 6), (668, 150), (720, 300), (610, RED + 2), (500, 290), (455, 150)], fill=(186, 42, 62, 255))
-    m = np.asarray(im)[:, :, 3] > 0
-    a = np.asarray(im).astype(float)
-    wr = noise((H, W), (3, 14), 5) * 0.6 + noise((H, W), (10, 3), 6) * 0.4            # wrinkles: streaky light/dark
-    wr = (wr - wr.mean()) / wr.std()
-    a[:, :, :3] = np.clip(a[:, :, :3] * (1 + 0.16 * wr[:, :, None]) + 26 * np.clip(wr - 1.1, 0, 2)[:, :, None], 0, 255)
-    a[~m] = 0; im = Image.fromarray(a.astype(np.uint8), 'RGBA'); d = ImageDraw.Draw(im)
-    for _ in range(26):                                                                  # creases in the tape
-        x = rng.uniform(470, 1000); y = rng.uniform(5, RED - 5); L = rng.uniform(20, 90); an = rng.uniform(0.9, 2.0)
-        q = (x + L * np.cos(an), y + L * np.sin(an))
-        if m[int(np.clip(q[1], 0, H - 1)), int(np.clip(q[0], 0, W - 1))] and m[int(y), int(x)]:
-            c = (226, 120, 136, 255) if rng.random() < 0.5 else (112, 8, 22, 255); d.line([(x, y), q], fill=c, width=1)
-    # two places where the lens is gone and the white reflector shows
-    def bare(poly):
-        g = Image.new('RGBA', (W, H), (0, 0, 0, 0)); gd = ImageDraw.Draw(g); gd.polygon(poly, fill=(226, 226, 230, 255))
-        ga = np.asarray(g).copy(); yy, xx = np.mgrid[0:H, 0:W]; on = ga[:, :, 3] > 0
-        ga[on & ((xx % 5 == 0) | (yy % 5 == 0))] = (186, 188, 196, 255); im.alpha_composite(Image.fromarray(ga, 'RGBA'))
-        ImageDraw.Draw(im).line(poly + [poly[0]], fill=(70, 6, 14, 255), width=3)
-    bare([(612, 34), (694, 30), (700, 150), (690, 252), (618, 246), (608, 140)])
-    bare([(764, 36), (905, 48), (900, 120), (868, 238), (820, 150)])
-    d = ImageDraw.Draw(im)
-    d.polygon([(688, 250), (724, 244), (738, 262), (716, 278), (694, 270)], fill=(14, 6, 6, 255))   # the hole at the impact
-    # cracks running out from the impact, into the unbroken lens and the amber
-    dark = (58, 6, 12, 255)
-    for line, w in (([(716, 270), (640, 300), (560, 322), (470, 300), (392, 322), (300, RED)], 3),
-                    ([(470, 300), (420, 190), (446, 90), (462, 0)], 3), ([(392, 322), (250, 300), (120, 312), (0, 306)], 2),
-                    ([(420, 190), (330, 150), (240, 160)], 1), ([(716, 278), (700, 360), (712, 430)], 2),
-                    ([(700, 360), (640, 392)], 1), ([(738, 262), (800, RED), (850, 380), (842, 470)], 2),
-                    ([(850, 380), (930, 400), (1000, 452)], 1), ([(560, 322), (548, 400), (575, 512)], 1)):
-        j = [(x + rng.uniform(-3, 3), y + rng.uniform(-3, 3)) for x, y in line]; j[0] = line[0]
+def tail_st(uv):
+    return np.c_[(uv[:, 1] - TAIL_V[0]) / (TAIL_V[1] - TAIL_V[0]), (uv[:, 0] - TAIL_U[0]) / (TAIL_U[1] - TAIL_U[0])]
+
+def tail_mask(grow=0):
+    """lookup: is a decal-space point inside the hole (optionally grown by `grow` px)"""
+    S = 4; im = Image.new('L', (TW * S, TH * S), 0); ImageDraw.Draw(im).polygon([(x * S, y * S) for x, y in TAIL_HOLE], fill=255)
+    if grow: im = im.filter(ImageFilter.MaxFilter(2 * grow * S + 1))
+    a = np.asarray(im) > 0
+    def inside(st):
+        x = np.floor(st[:, 0] * TW * S).astype(int); y = np.floor(st[:, 1] * TH * S).astype(int)
+        ok = (x >= 0) & (x < TW * S) & (y >= 0) & (y < TH * S); r = np.zeros(len(st), bool); r[ok] = a[y[ok], x[ok]]; return r
+    return inside
+
+def tail_inside_images():
+    """what shows through the hole: the scuffed inner red lens, two bare patches of white reflector optics, a dark gap
+    along the bottom. Returns (diffuse RGB, normal map RGB)."""
+    rng = np.random.default_rng(83); yy, xx = np.mgrid[0:TH, 0:TW].astype(float)
+    n1 = noise((TH, TW), 6, 1); n2 = noise((TH, TW), (2, 12), 2)
+    a = np.array([118.0, 15, 27]) * (0.80 + 0.40 * n1[:, :, None]); hgt = 0.6 * n2                 # dull dark red
+    im = Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), 'RGB').convert('RGBA'); d = ImageDraw.Draw(im, 'RGBA')
+    d.polygon([(711, 20), (744, 20), (752, 150), (780, 245), (760, 320), (716, 320)], fill=(168, 20, 38, 255))     # shard left standing
+    sc = Image.new('RGBA', (TW, TH), (0, 0, 0, 0)); sd = ImageDraw.Draw(sc)                        # white scrape marks
+    for cx, cy, sx, sy, cnt in ((585, 175, 42, 75, 700), (735, 200, 12, 70, 160), (640, 318, 60, 10, 140), (830, 250, 12, 50, 60)):
+        for _ in range(cnt):
+            x = rng.normal(cx, sx); y = rng.normal(cy, sy); L = rng.uniform(6, 34); an = rng.normal(-1.05, 0.22)
+            sd.line([(x, y), (x + L * np.cos(an), y + L * np.sin(an))], fill=(244, 226, 228, int(rng.uniform(40, 150))), width=int(rng.integers(1, 3)))
+    im.alpha_composite(sc.filter(ImageFilter.GaussianBlur(0.6)))
+    grid = np.zeros((TH, TW), bool)
+    for poly in ([(647, 58), (711, 60), (711, 300), (650, 297)], [(744, 52), (812, 60), (810, 185), (782, 240), (754, 150)]):
+        g = Image.new('L', (TW, TH), 0); ImageDraw.Draw(g).polygon(poly, fill=255); grid |= np.asarray(g) > 0
+    a = np.asarray(im).astype(float)[:, :, :3]
+    cell = 7.0; px_ = (xx % cell) / cell - 0.5; py_ = (yy % cell) / cell - 0.5; pil = 1 - 4 * np.maximum(px_ ** 2, py_ ** 2)   # pillow optics
+    a[grid] = (np.array([232.0, 232, 236]) * (0.72 + 0.28 * pil[:, :, None]))[grid]; hgt = np.where(grid, 6.0 * pil, hgt)
+    edge = Image.fromarray((grid * 255).astype(np.uint8)).filter(ImageFilter.FIND_EDGES); a[np.asarray(edge) > 0] = (60, 8, 14)
+    im = Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), 'RGB'); d = ImageDraw.Draw(im)
+    d.polygon([(596, 322), (700, 314), (712, 296), (736, 300), (742, 318), (850, 322), (850, 345), (596, 345)], fill=(10, 5, 6))   # gap at the bottom
+    d.line([(852, 60), (846, 322)], fill=(40, 6, 10), width=4)
+    # the lens edge throws a shadow onto the inside along the top and inboard sides of the hole
+    hole = Image.new('L', (TW, TH), 0); ImageDraw.Draw(hole).polygon(TAIL_HOLE, fill=255)
+    lit = np.asarray(ImageChops.offset(hole, 9, 12).filter(ImageFilter.GaussianBlur(5))).astype(float) / 255
+    a = np.asarray(im).astype(float) * (0.38 + 0.62 * lit[:, :, None])
+    gy, gx = np.gradient(gaussian_filter(hgt, 0.7)); nz = np.ones_like(gx); l = np.sqrt(gx ** 2 + gy ** 2 + 1)
+    nm = np.dstack([-gx / l, gy / l, nz / l]) * 0.5 + 0.5
+    return Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), 'RGB'), Image.fromarray((nm * 255).astype(np.uint8), 'RGB')
+
+def tail_crack_image():
+    """transparent except for the cracks that run on from the break, and the bright broken edge of the lens"""
+    rng = np.random.default_rng(84); im = Image.new('RGBA', (TW, TH), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
+    dark = (40, 5, 9, 255); lightc = (240, 205, 200, 255)
+    for line, w in (([(333, 334), (250, 336), (170, 338), (110, 372), (30, 420), (0, 432)], 3),      # along the joint, then down across the amber
+                    ([(170, 338), (120, 330), (60, 334)], 1), ([(506, 150), (486, 120), (476, 60), (484, 0)], 2),
+                    ([(470, 250), (430, 240), (396, 262)], 1), ([(690, 342), (684, 392), (694, 432)], 2),
+                    ([(684, 392), (640, 410)], 1), ([(760, 340), (772, 420), (742, 512)], 2), ([(772, 420), (820, 450)], 1),
+                    ([(600, 342), (560, 372), (500, 384)], 1)):
+        j = [(x + rng.uniform(-2, 2), y + rng.uniform(-2, 2)) for x, y in line]; j[0] = line[0]
         d.line(j, fill=dark, width=w, joint='curve')
-        d.line([(x + w, y - 1) for x, y in j], fill=(238, 196, 190, 150) if w > 1 else dark, width=1)   # bright edge of the crack
+        if w > 1: d.line([(x + 1, y - w) for x, y in j], fill=lightc, width=1)
+    edge = TAIL_HOLE[:5]                                                                             # the curved break
+    d.line([(x - 2, y - 1) for x, y in edge], fill=lightc, width=3, joint='curve'); d.line([(x - 5, y - 2) for x, y in edge], fill=dark, width=2, joint='curve')
+    d.line([(520, 17), (800, 17)], fill=lightc, width=2)
     return im
 
+def subdivide_cut(V, F, st_of, inside, keep_inside=False, levels=4):
+    """drop the triangles inside the hole (or keep only those), after splitting the ones that straddle its outline
+    (1 -> 4, `levels` times). Returns V, F, number of triangles dropped."""
+    V = V.astype(float); F = F.copy()
+    for _ in range(levels):
+        ins = inside(st_of(V)); f = ins[F]; mix = f.any(1) & ~f.all(1)
+        if not mix.any(): break
+        T = F[mix]; base = len(V)
+        mids = [(V[T[:, i]] + V[T[:, (i + 1) % 3]]) / 2 for i in range(3)]
+        for m in mids: m[:, 3:6] = unit(m[:, 3:6]); m[:, 8:11] = unit(m[:, 8:11])
+        k_ = len(T); a, b, c = T.T; ab = base + np.arange(k_); bc = ab + k_; ca = bc + k_
+        V = np.vstack([V] + mids)
+        F = np.vstack([F[~mix], np.c_[a, ab, ca], np.c_[ab, b, bc], np.c_[ca, bc, c], np.c_[ab, bc, ca]])
+    cen = inside(st_of(V)[F].mean(1)) ^ keep_inside; F = F[~cen]
+    used = np.unique(F); re = np.full(len(V), -1); re[used] = np.arange(len(used))
+    return V[used], re[F], int(cen.sum())
+
 def taillight_damage(k):
-    k.set_texture('gh_taillight_damage.png', png_bytes(taillight_image()))
+    inside = tail_mask(); near = tail_mask(grow=5)
+    lens, _, M = k.find('Object036')                                             # red lens, both sides
+    def st_of(M):                                                                # the left lamp shares the UVs: keep it out
+        return lambda V: np.where(((V[:, :3] @ M[:3, :3])[:, 0] + M[3, 0] < 0)[:, None], tail_st(V[:, 6:8]), -1.0)
+    st_n = st_of(M)
+    # 1. what shows through: a copy of the lens surface, pushed in, with its own texture and normal map
+    V, F, _ = subdivide_cut(lens.V, lens.F, st_n, near, keep_inside=True)
+    V[:, :3] = V[:, :3] @ M[:3, :3] + M[3, :3]; nr = unit(V[:, 3:6] @ M[:3, :3]); nr *= np.sign(nr @ np.array([-0.3, 0.0, -1.0]) + 1e-9)[:, None]; V[:, 3:6] = nr
+    V[:, :3] -= nr * TAIL_DEPTH; V[:, 6:8] = tail_st(V[:, 6:8])
+    p = V[:, :3]; e1 = p[F[:, 1]] - p[F[:, 0]]; e2 = p[F[:, 2]] - p[F[:, 0]]            # tangent = direction of increasing s
+    d1 = V[F[:, 1], 6:8] - V[F[:, 0], 6:8]; d2 = V[F[:, 2], 6:8] - V[F[:, 0], 6:8]; det = d1[:, 0] * d2[:, 1] - d2[:, 0] * d1[:, 1]
+    tf = (e1 * d2[:, 1:2] - e2 * d1[:, 1:2]) / np.where(np.abs(det) < 1e-12, 1e-12, det)[:, None]; tg = np.zeros((len(V), 3))
+    for i in range(3): np.add.at(tg, F[:, i], unit(tf))
+    V[:, 8:11] = unit(tg)
+    dif, nm = tail_inside_images()
+    k.set_texture('gh_tail_inside.png', png_bytes(dif)); k.set_texture('gh_tail_inside_nm.png', png_bytes(nm))
+    m = simple_material('gh_tail_inside', 'gh_tail_inside.png', 0.40, 0.45, 0.55, 45.0, shader='ksPerPixelNM')
+    m.tex.append(['txNormal', 1, 'gh_tail_inside_nm.png'])
+    k.add_mesh('TAILLIGHT_INSIDE_R', V, fix_winding(V, F), k.add_material(m), shadows=0)
+    # 2. the hole itself, and the patterned layer that sat just behind the lens there
+    info = {'inside_tris': len(F)}
+    V, F, info['lens_tris_cut'] = subdivide_cut(lens.V, lens.F, st_n, inside)
+    lens.V = V.astype(lens.V.dtype); lens.F = F.astype(lens.F.dtype); update_bounds(lens)
+    bump, _, Mb = k.find('headlights_part010')
+    info['layer_tris_cut'] = drop_tris(bump, inside(st_of(Mb)(bump.V.astype(float)))[bump.F].all(1))
+    # 3. cracks and the bright broken edge, a hair outside the red and amber lenses
+    k.set_texture('gh_taillight_damage.png', png_bytes(tail_crack_image()))
     m = simple_material('gh_taillight_damage', 'gh_taillight_damage.png', 0.42, 0.45, 0.45, 35.0, shader='ksPerPixelAT', alpha_ref=0.5)
     m.alpha_tested = 1; mid = k.add_material(m)
     Vs = []; Fs = []; off = 0
-    for name in ('Object036', 'signal_r_glass'):                 # red and amber lenses; left and right share one UV layout
-        n, _, M = k.find(name); w = world_pos(n, M); uv = n.V[:, 6:8]
+    for name in ('Object036', 'signal_r_glass'):
+        n, _, M = k.find(name); w = world_pos(n, M); st = tail_st(n.V[:, 6:8])
         nr = unit(n.V[:, 3:6] @ M[:3, :3]); nr *= np.sign(nr @ np.array([-0.3, 0.0, -1.0]) + 1e-9)[:, None]
-        ok = (w[:, 0] < 0) & (uv[:, 1] > TAIL_V[0] - 0.02) & (uv[:, 1] < TAIL_V[1] + 0.02)
+        ok = (w[:, 0] < 0) & (st[:, 0] > -0.03) & (st[:, 0] < 1.0)
         F = n.F[ok[n.F].all(1)]; used = np.unique(F); re = np.full(len(w), -1); re[used] = np.arange(len(used))
-        V = np.zeros((len(used), 11)); V[:, :3] = w[used] + nr[used] * 0.0012; V[:, 3:6] = nr[used]
-        V[:, 6] = (uv[used, 1] - TAIL_V[0]) / (TAIL_V[1] - TAIL_V[0]); V[:, 7] = (uv[used, 0] - TAIL_U[0]) / (TAIL_U[1] - TAIL_U[0])
-        V[:, 8:11] = [-1, 0, 0]
+        V = np.zeros((len(used), 11)); V[:, :3] = w[used] + nr[used] * 0.0012; V[:, 3:6] = nr[used]; V[:, 6:8] = st[used]; V[:, 8:11] = [-1, 0, 0]
         Vs.append(V); Fs.append(re[F] + off); off += len(V)
     V = np.vstack(Vs); F = np.vstack(Fs)
     k.add_mesh('TAILLIGHT_DAMAGE_R', V, fix_winding(V, F), mid, shadows=0)
-    return {'tris': len(F)}
+    info['crack_tris'] = len(F); return info
 
 def build(src, out):
     k = Kn5.load(src); info = {}
