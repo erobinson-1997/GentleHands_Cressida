@@ -1061,8 +1061,9 @@ SEAT_PATH = np.array([   # z, y of the seat's centre line from the front of the 
     (-0.400, 0.600, 0.235, 0.105), (-0.432, 0.740, 0.262, 0.090), (-0.462, 0.860, 0.230, 0.055), (-0.488, 0.960, 0.175, 0.030),
     (-0.500, 1.030, 0.120, 0.004)])
 SEAT_RGB = (214, 168, 177)        # sun-faded red: dusty pink
+SLOT_HALF = (0.040, 0.055); SLOT_R = 0.016; STRAP_W = 0.056     # harness slots in the backrest; shoulder strap width
 
-def seat_frame(stations=57):
+def seat_frame(stations=141):
     from scipy.interpolate import PchipInterpolator
     d = np.r_[0, np.cumsum(np.linalg.norm(np.diff(SEAT_PATH[:, :2], axis=0), axis=1))]; f = PchipInterpolator(d / d[-1], SEAT_PATH)
     S = np.linspace(0, 1, stations); q = f(S); t = unit(f.derivative()(S)[:, :2]); nrm = np.c_[t[:, 1], -t[:, 0]]     # (z, y): towards the occupant
@@ -1089,10 +1090,6 @@ def bucket_seat_image(S, q, i_sh, size=1024, seed=41):
     seams += [[(px(0.0), row(corner * 0.48)), (px(0.0), row(corner))]]
     over((120, 86, 96), 0.70 * mask(lambda d: [d.line(s_, fill=255, width=4) for s_ in seams], 1.2))
     over((236, 200, 206), 0.35 * mask(lambda d: [d.line([(a[0] + 5, a[1] + 5), (b_[0] + 5, b_[1] + 5)], fill=255, width=4) for a, b_ in seams], 2.0))
-    # harness slots at shoulder height, with their black trim
-    slot = [(px(sg * 0.40) - 36, row(S[i_sh]) - 50, px(sg * 0.40) + 36, row(S[i_sh]) + 42) for sg in (-1, 1)]
-    over((14, 14, 16), mask(lambda d: [d.rounded_rectangle(b_, radius=16, fill=255) for b_ in slot], 1.0))
-    over((40, 40, 44), 0.8 * mask(lambda d: [d.rounded_rectangle(b_, radius=16, outline=255, width=7) for b_ in slot], 0.8))
     # the print on the headrest: a dark ring with a brushed band across it
     cx, cy = px(0.0), row(0.925)
     ring = mask(lambda d: (d.ellipse((cx - 50, cy - 46, cx + 50, cy + 46), outline=255, width=6), d.ellipse((cx - 36, cy - 33, cx + 36, cy + 33), outline=255, width=2)), 0.8)
@@ -1101,8 +1098,16 @@ def bucket_seat_image(S, q, i_sh, size=1024, seed=41):
     # grime: grey where shoulders, head and hands rub; darker towards the edges of the shell
     dirt = np.exp(-(((xx - px(0.78)) / 60) ** 2 + ((yy - row(0.80)) / 90) ** 2)) + np.exp(-(((xx - px(-0.78)) / 60) ** 2 + ((yy - row(0.78)) / 80) ** 2))
     dirt += 0.7 * np.exp(-(((xx - px(0.45)) / 70) ** 2 + ((yy - row(0.93)) / 40) ** 2)) + 0.5 * np.exp(-(((xx - px(0.0)) / 150) ** 2 + ((yy - row(0.10)) / 50) ** 2))
-    over((120, 112, 112), np.clip(0.55 * dirt * (0.5 + noise((H, W), 9, seed + 3)), 0, 0.75))
-    img[:, W // 2:] *= 0.90                                                                                    # back of the shell: a shade darker
+    over((120, 112, 112), np.clip(0.55 * dirt * (0.5 + noise((H, W), 9, seed + 3)), 0, 0.75) * (xx < W // 2))
+    # back of the shell: black gel coat full of prismatic glitter
+    rng = np.random.default_rng(seed + 4); bk = img[:, W // 2:]; bh, bw = bk.shape[:2]
+    bk[:] = np.array([15, 15, 18.0]) * (0.85 + 0.3 * noise((bh, bw), 6, seed + 5))[..., None]
+    n = int(0.10 * bh * bw); ys, xs = rng.integers(0, bh, n), rng.integers(0, bw, n); hue = rng.random(n)
+    rgb = 0.5 + 0.5 * np.cos(2 * np.pi * (hue[:, None] + np.array([0, 1 / 3, 2 / 3]))); sat = rng.uniform(0.4, 0.9, n)[:, None]
+    bk[ys, xs] = 255 * rng.uniform(0.25, 0.85, n)[:, None] * (1 - sat + sat * rgb)
+    n = int(0.004 * bh * bw); ys, xs = rng.integers(0, bh - 1, n), rng.integers(0, bw - 1, n)
+    for dy in (0, 1):
+        for dx in (0, 1): bk[ys + dy, xs + dx] = 255 * rng.uniform(0.75, 1.0, n)[:, None] * np.array([1.0, 0.97, 1.0])
     return Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), 'RGB')
 
 def harness_image(w=128, h=512):
@@ -1116,25 +1121,64 @@ def harness_image(w=128, h=512):
 
 def bucket_seat(k):
     gone = sum(drop_components(k, nm, lambda c: c[0] > 0.05 and c[2] >= -0.75) for nm in ('seatleather1', 'seatleather2'))
-    S, q, t, nrm, length = seat_frame()
-    uf = np.linspace(-1, 1, 21); ub = np.linspace(1, -1, 11)
+    S, q, t, nrm, length = seat_frame(141)
+    uf = np.linspace(-1, 1, 61); ub = np.linspace(1, -1, 61)
     loop = [(u, False) for u in uf] + [(u, True) for u in ub] + [(-1.0, False)]
     U = np.r_[0.02 + 0.46 * (uf + 1) / 2, 0.52 + 0.46 * (1 - ub) / 2, 1.02]
     P = np.array([[seat_point(q, nrm, i, u, back=bk) for u, bk in loop] for i in range(len(S))])
     UV = np.stack([np.broadcast_to(U[None], P.shape[:2]), np.broadcast_to((0.01 + 0.98 * S)[:, None], P.shape[:2])], axis=-1)
-    shell = surf(P, UV, 'out'); caps = Builder()
+    i_sh = int(np.argmin(np.abs(q[:, 1] - 0.80) + (q[:, 0] > -0.36))); i_lap = int(np.argmin(np.abs(q[:, 0] + 0.215) + (q[:, 1] > 0.36)))
+    # harness slots cut right through the backrest (both faces), lined with a black rubber grommet
+    def at(s, u, lift=0.0, back=False):
+        qi = np.array([np.interp(s, S, q[:, j]) for j in range(4)]); ni = unit(np.array([[np.interp(s, S, nrm[:, j]) for j in range(2)]]))
+        return seat_point(qi[None], ni, 0, u, lift=lift, back=back)
+    width = lambda s: np.interp(s, S, q[:, 2])
+    slots = [(sg * 0.40 * width(S[i_sh]), S[i_sh] * length + 0.008) for sg in (-1, 1)]
+    def sdf(a, b):
+        out = np.full(np.shape(a), np.inf)
+        for a0, b0 in slots:
+            qa = np.abs(a - a0) - (SLOT_HALF[0] - SLOT_R); qb = np.abs(b - b0) - (SLOT_HALF[1] - SLOT_R)
+            out = np.minimum(out, np.hypot(np.maximum(qa, 0), np.maximum(qb, 0)) + np.minimum(np.maximum(qa, qb), 0) - SLOT_R)
+        return out
+    us = np.array([u for u, _ in loop]); bks = np.array([bk for _, bk in loop]); sc = (S[:-1] + S[1:]) / 2
+    uc = (us[:-1] + us[1:]) / 2; same = bks[:-1] == bks[1:]
+    cut = (sdf(uc[None] * width(sc)[:, None], sc[:, None] * length) < 0.002) & same[None]
+    Vs_, Fs_ = surf(P, UV, 'out'); Fs_ = Fs_[~np.r_[cut.ravel(), cut.ravel()]]
+    def rrect(hx, hy, r, n=8):
+        pts = []
+        for cx, cy, a0 in ((1, 1, 0), (-1, 1, 90), (-1, -1, 180), (1, -1, 270)):
+            for a in np.radians(np.linspace(a0, a0 + 90, n)): pts.append((cx * (hx - r) + r * np.cos(a), cy * (hy - r) + r * np.sin(a)))
+        return np.array(pts + pts[:1])
+    rims = []
+    for a0, b0 in slots:
+        rings = []
+        for back, d, lift in ((False, 0.012, 0.0006), (False, 0.004, 0.0035), (False, -0.006, 0.0035), (True, -0.006, 0.0035), (True, 0.004, 0.0035), (True, 0.012, 0.0006)):
+            o = rrect(SLOT_HALF[0] + d, SLOT_HALF[1] + d, SLOT_R + d); ss_ = (b0 + o[:, 1]) / length
+            rings.append([at(s_, (a0 + da) / width(s_), lift, back) for (da, _), s_ in zip(o, ss_)])
+        R = np.array(rings); rims.append(two_sided(*surf(R, np.full(R.shape[:2] + (2,), 0.5), 'out')))
+    k.set_texture('gh_slot_trim.png', flat_texture((22, 22, 24)))
+    k.add_mesh('BUCKET_SEAT_SLOTS', *join(*rims), k.add_material(simple_material('gh_slot_trim', 'gh_slot_trim.png', 0.40, 0.42, 0.20, 18.0)))
+    caps = Builder()
     for i, sgn in ((0, -1.0), (len(S) - 1, 1.0)):
         caps.poly(P[i, :-1], (0, sgn * t[i, 1], sgn * t[i, 0]), [(0.75, 0.01 + 0.98 * S[i])] * (P.shape[1] - 1))
-    i_sh = int(np.argmin(np.abs(q[:, 1] - 0.80) + (q[:, 0] > -0.36))); i_lap = int(np.argmin(np.abs(q[:, 0] + 0.215) + (q[:, 1] > 0.36)))
     k.set_texture('gh_bucket_seat.png', png_bytes(bucket_seat_image(S, q, i_sh)))
-    k.add_mesh('BUCKET_SEAT', *join(shell, caps.done()), k.add_material(simple_material('gh_bucket_seat', 'gh_bucket_seat.png', 0.42, 0.50, 0.04, 6.0)))
-    # harness: shoulder straps down the backrest to the buckle, on through the slots to the rear floor; lap belt across the cushion
+    V, F = join((Vs_, Fs_), caps.done()); shell = V[F][:, :, 6].mean(1) > 0.5                                  # the back of the shell: glossy black glitter gel coat
+    def part(mask):
+        used = np.unique(F[mask]); re = np.full(len(V), -1); re[used] = np.arange(len(used)); return V[used], re[F[mask]]
+    k.add_mesh('BUCKET_SEAT', *part(~shell), k.add_material(simple_material('gh_bucket_seat', 'gh_bucket_seat.png', 0.42, 0.50, 0.04, 6.0)))
+    m = simple_material('gh_seat_shell', 'gh_bucket_seat.png', 0.30, 0.40, 0.90, 90.0, shader='ksPerPixelReflection')
+    for p_, v_ in (('fresnelC', 0.06), ('fresnelEXP', 3.0), ('isAdditive', 0.0), ('fresnelMaxLevel', 0.40)): m.set(p_, v_)
+    k.add_mesh('BUCKET_SEAT_SHELL', *part(shell), k.add_material(m))
+    # harness: shoulder straps down the backrest to the buckle, back through the slots to the rear floor; lap belt across the cushion
     straps = []
     for sg in (-1, 1):
         idx = range(i_lap, i_sh + 1); fr = [(i - i_lap) / (i_sh - i_lap) for i in idx]
-        straps.append(ribbon([seat_point(q, nrm, i, sg * (0.10 + 0.30 * f_), lift=0.012) for i, f_ in zip(idx, fr)], (1, 0, 0), 0.072, v0=0.1))
-        a = seat_point(q, nrm, i_sh, sg * 0.40, lift=0.004, back=True); b_ = np.array([SEAT_X + sg * 0.11, pan_height(np.array([SEAT_X]), np.array([-0.99]))[0] + 0.006, -0.99])
-        f_ = np.linspace(0, 1, 12)[:, None]; straps.append(ribbon(a + (b_ - a) * f_ - np.array([0, 0.035, 0]) * np.sin(np.pi * f_), (1, 0, 0), 0.072, v0=0.55))
+        fe = [seat_point(q, nrm, i, sg * (0.10 + 0.30 * f_), lift=0.012) for i, f_ in zip(idx, fr)]
+        straps.append(ribbon(fe, (1, 0, 0), STRAP_W, v0=0.1))
+        a = seat_point(q, nrm, i_sh, sg * 0.40, lift=0.004, back=True)
+        straps.append(ribbon([fe[-1], (fe[-1] + a) / 2, a], (1, 0, 0), STRAP_W, v0=0.5))                         # through the slot
+        b_ = np.array([SEAT_X + sg * 0.11, pan_height(np.array([SEAT_X]), np.array([-0.99]))[0] + 0.006, -0.99])
+        f_ = np.linspace(0, 1, 12)[:, None]; straps.append(ribbon(a + (b_ - a) * f_ - np.array([0, 0.035, 0]) * np.sin(np.pi * f_), (1, 0, 0), STRAP_W, v0=0.55))
         straps.append(box(b_ - (0.022, 0.004, 0.022), b_ + (0.022, 0.010, 0.022), (0.5, 0.02)))                 # anchor plate bolted to the pan
     tg = np.array([0, t[i_lap, 1], t[i_lap, 0]])
     straps.append(ribbon([seat_point(q, nrm, i_lap, u, lift=0.014) for u in np.linspace(-1, 1, 17)], tg, 0.050, v0=0.6))
@@ -1142,7 +1186,7 @@ def bucket_seat(k):
     k.set_texture('gh_harness.png', png_bytes(harness_image()))
     k.add_mesh('HARNESS', *join(*straps), k.add_material(simple_material('gh_harness', 'gh_harness.png', 0.42, 0.45, 0.10, 12.0)), shadows=0)
     k.add_mesh('BUCKET_SEAT_MOUNT', *box((SEAT_X - 0.20, FLOOR_Y, -0.30), (SEAT_X + 0.20, 0.285, 0.09)), k.mat_id('plastic_black1'))
-    return {'seat_tris_removed': gone}
+    return {'seat_tris_removed': gone, 'slot_cells_cut': int(cut.sum())}
 
 # ---- manual shifter with the cloth bag as its boot
 SHIFT_XZ = (-0.02, 0.215); SHIFT_Y = 0.333      # where the lever comes out of the console; height of the console there
@@ -1159,7 +1203,7 @@ def lathe(prof, v0, v1, seg=18, urep=1.0, tilt=0.0, planar=None, u0=0.0):
     else: UV = np.stack([np.broadcast_to((u0 + th / (2 * np.pi) * urep)[None], P.shape[:2]), np.broadcast_to((v0 + (v1 - v0) * f)[:, None], P.shape[:2])], axis=-1)
     return surf(P, UV, 'out')
 
-KNOB_BASE, KNOB_SEAM, KNOB_TOP = 0.158, 0.236, 0.2500       # heights above the console: bottom of the knob, its stitched ring, its crown
+KNOB_BASE, KNOB_SEAM, KNOB_TOP = 0.130, 0.208, 0.2220       # heights above the console: bottom of the knob, its stitched ring, its crown
 KNOB_R = 0.0250                                             # radius at the stitched ring
 
 def shifter_image(size=1024, seed=51):
@@ -1170,6 +1214,10 @@ def shifter_image(size=1024, seed=51):
     yy, xx = np.mgrid[0:h, 0:S].astype(np.float64)
     img[h:] = (64, 148, 104); folds = 0.5 + 0.5 * np.sin(xx / S * 2 * np.pi * 9 + 3 * noise((h, S), 12 * k_, seed + 1) * 6)
     img[h:] *= (0.62 + 0.38 * folds * (0.6 + 0.4 * noise((h, S), 5 * k_, seed + 2)))[..., None]
+    gath = (yy[:110] >= 0) * (0.74 + 0.26 * (0.5 + 0.5 * np.sin(xx[:110] / S * 2 * np.pi * 18 + 2 * noise((110, S), 4, seed + 6))))
+    img[h + 8:h + 118] *= gath[..., None]                                                                        # the gathered hem
+    img[330:430, 400:500] = (206, 196, 168); img[330:430, 400:500] *= (0.8 + 0.2 * (np.mgrid[0:100, 0:100].sum(0) // 6 % 2))[..., None]   # twisted cord
+    img[330:430, 600:700] = (150, 152, 156)                                                                      # eyelets
     im = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), 'RGB'); d = ImageDraw.Draw(im)
     for x0 in range(0, S, 10 * k_):                                                                              # hem of the bag
         d.line([(x0, h + 12 * k_), (x0 + 6 * k_, h + 12 * k_)], fill=(214, 206, 170), width=2 * k_)
@@ -1199,24 +1247,59 @@ def shifter_image(size=1024, seed=51):
     for i, (a, b) in enumerate(['12', '34', '5R']):
         x1 = cx - 32 + 32 * i; d.line([(x1, cy - 20), (x1, cy + 20)], fill=emb, width=4)
         d.text((x1, cy - 22), a, font=f3, fill=emb, anchor='mb'); d.text((x1, cy + 22), b, font=f3, fill=emb, anchor='mt')
+    # the bag: cream overlocked seams, and the gold script low down on the driver's side (the bag's texture runs clockwise, urep -1, so it reads the right way round)
+    d = ImageDraw.Draw(im)
+    for sx_ in (360, 870):
+        for y0 in range(h + 30, S - 8, 9): d.line([(sx_ - 3, y0), (sx_ + 3, y0 + 5)], fill=(214, 206, 170), width=2)
+    tx = Image.new('L', (330, 110), 0); ImageDraw.Draw(tx).text((165, 55), 'Crown Royal', font=font(['segoesc.ttf', 'georgiai.ttf', 'ariali.ttf'], 46), fill=255, anchor='mm')
+    tx = tx.rotate(14, expand=True, resample=Image.BICUBIC)
+    sh = tx.filter(ImageFilter.MaxFilter(3)); pos = (114 - tx.width // 2, 835 - tx.height // 2)
+    im.paste((60, 70, 40), pos, sh); im.paste((206, 168, 82), pos, tx)
     return im
 
+def tube(C, r, uvc, seg=8):
+    """a round cord of radius r along the points C (n, 3); the texture is a small patch round uvc"""
+    C = np.asarray(C, float); T = unit(np.gradient(C, axis=0)); ref = C.mean(0) - np.array([SHIFT_XZ[0], C[:, 1].mean(), SHIFT_XZ[1]]); ref[1] = 0
+    N = unit(np.cross(T, unit(ref[None]))); B = np.cross(T, N); th = np.linspace(0, 2 * np.pi, seg + 1)
+    P = C[:, None] + r * (np.cos(th)[None, :, None] * N[:, None] + np.sin(th)[None, :, None] * B[:, None])
+    UV = np.stack([np.broadcast_to(uvc[0] + 0.03 * th[None] / (2 * np.pi), P.shape[:2]), np.broadcast_to(uvc[1] + 0.03 * np.linspace(0, 1, len(C))[:, None], P.shape[:2])], -1)
+    return surf(P, UV, (P - C[:, None]).reshape(-1, 3))
+
 def shifter(k):
-    x0, z0 = SHIFT_XZ; tilt = np.radians(7.0)
+    x0, z0 = SHIFT_XZ; tilt = np.radians(7.0); Y = SHIFT_Y; HB = 0.100
+    phase = noise((1, 97), 3, 53)[0] * 2.0
     def bag(t_):
-        base = lambda th: 0.058 / np.maximum(np.abs(np.cos(th)), np.abs(np.sin(th))) ** 0.75                    # rounded square at the console opening
-        neck = 0.021 + 0.012 * max(0.0, (t_ - 0.82) / 0.18)                                                      # gathered round the lever, hem flaring out again
-        m = ss(0.0, 0.85, t_) ** 0.8
-        return lambda th: base(th) * (1 - m) + neck * m + 0.006 * np.sin(7 * th + 4 * t_) * np.sin(np.pi * min(t_ * 1.15, 1.0))
-    ts = np.linspace(0, 1, 11); Y = SHIFT_Y; B, Sm, T = Y + KNOB_BASE, Y + KNOB_SEAM, Y + KNOB_TOP
+        base = lambda th: 0.060 / np.maximum(np.abs(np.cos(th)), np.abs(np.sin(th))) ** 0.75                    # rounded square at the console opening
+        m = ss(0.05, 0.80, t_) ** 0.9; neck = 0.029 + 0.009 * max(0.0, (t_ - 0.80) / 0.20)                      # drawn in by the string, the ruffled hem opening out above it
+        bulge = 0.007 * np.sin(np.pi * min(t_ / 0.6, 1.0))
+        def r(th):
+            folds = 0.006 * np.sin(7 * th + 4 * t_) * np.sin(np.pi * min(t_ * 1.15, 1.0))
+            gathers = 0.0022 * ss(0.68, 0.84, t_) * np.sin(18 * th + np.interp(th, np.linspace(0, 2 * np.pi, 97), phase))
+            return base(th) * (1 - m) + neck * m + bulge * (1 - m) + folds + gathers
+        return r
+    def bag_pt(t_, th, out=0.0):
+        h = Y - 0.004 + HB * t_; r = bag(t_)(np.array([th]))[0] + out
+        return np.array([x0 + r * np.cos(th), h, z0 + r * np.sin(th) - (h - Y) * np.tan(tilt * 0.5)])
+    ts = np.linspace(0, 1, 21); B, Sm, T = Y + KNOB_BASE, Y + KNOB_SEAM, Y + KNOB_TOP
     # the knob: slim at the lever, swelling to a wide flat-topped head; the side is one leather panel, the crown another
     side = [(0.0080, B - 0.0005), (0.0135, B), (0.0150, B + 0.004), (0.0152, B + 0.018), (0.0162, B + 0.032), (0.0183, B + 0.046), (0.0212, B + 0.058),
             (0.0236, B + 0.068), (0.0248, B + 0.075), (KNOB_R, Sm)]
     crown = [(KNOB_R, Sm), (0.0244, Sm + 0.0045), (0.0222, Sm + 0.0085), (0.0180, Sm + 0.0115), (0.0120, Sm + 0.0132), (0.0060, Sm + 0.0139), (0.0004, T)]
-    parts = [two_sided(*lathe([(bag(t_), Y - 0.004 + 0.082 * t_) for t_ in ts], 0.99, 0.51, seg=28, urep=2.0, tilt=tilt * 0.5)),   # seen from inside too, through the open hem
-             lathe([(0.009, Y + 0.045), (0.009, B + 0.004)], 0.475, 0.495, seg=10, tilt=tilt),
+    parts = [two_sided(*lathe([(bag(t_), Y - 0.004 + HB * t_) for t_ in ts], 0.99, 0.51, seg=144, urep=-1.0, tilt=tilt * 0.5)),   # seen from inside too, through the open hem
+             lathe([(0.0110, Y + 0.045), (0.0125, Y + 0.080), (0.0118, Y + 0.105), (0.0108, B + 0.004)], 0.475, 0.495, seg=14, tilt=tilt),
              lathe(side, 300 / 1024, 16 / 1024, seg=24, urep=-1.0, u0=0.25, tilt=tilt),                          # badge towards the driver (+x), seam to the rear; urep -1 so it is not mirrored
              lathe(crown, 0, 0, seg=24, tilt=tilt, planar=(80 / 1024, 390 / 1024, 72 / 1024 / KNOB_R))]
+    # the drawstring: two eyelets at the front of the hem, a loop of cream cord hanging between them and a knotted end from each
+    cord, ring = (450 / 1024, 380 / 1024), (650 / 1024, 380 / 1024); te = 0.86; the = [np.pi / 2 + 0.24, np.pi / 2 - 0.24]
+    for th in the:
+        c = bag_pt(te, th, 0.0015); n_ = np.array([np.cos(th), 0, np.sin(th)]); e1 = np.array([-np.sin(th), 0, np.cos(th)]); e2 = np.array([0, 1.0, 0])
+        a = np.linspace(0, 2 * np.pi, 13); parts.append(tube(c + 0.0035 * (np.cos(a)[:, None] * e1 + np.sin(a)[:, None] * e2), 0.0011, ring, seg=6))
+    s = np.linspace(0, 1, 15); thl = the[0] + (the[1] - the[0]) * s; tl = te - 0.42 * np.sin(np.pi * s)
+    parts.append(tube([bag_pt(t_, th, 0.004 + 0.003 * np.sin(np.pi * f)) for t_, th, f in zip(tl, thl, s)], 0.0018, cord))
+    for th, t_end, sw in ((the[0], 0.14, 0.30), (the[1], 0.30, -0.22)):
+        s = np.linspace(0, 1, 10); pts = [bag_pt(te - (te - t_end) * f, th + sw * f, 0.005 + 0.004 * f) for f in s]
+        parts.append(tube(pts, 0.0018, cord)); e = pts[-1]; dvec = unit((pts[-1] - pts[-2])[None])[0]
+        parts.append(tube([e - dvec * 0.002, e + dvec * 0.004, e + dvec * 0.009], 0.0034, cord))               # knot, frayed end below it
     k.set_texture('gh_shifter.png', png_bytes(shifter_image()))
     V, F = join(*parts)
     k.add_mesh('SHIFTER', V, F, k.add_material(simple_material('gh_shifter', 'gh_shifter.png', 0.42, 0.48, 0.12, 14.0)))
