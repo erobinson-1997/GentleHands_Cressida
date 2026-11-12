@@ -57,7 +57,7 @@ headlight lenses with amber corners, and the broken outer end of the right tail 
 - preview.py   software render of a kn5 for a quick look without the game: `python scripts/preview.py <kn5> <out_dir> [view ...]`
 
 Front-end grime (`bug_splatter`): dead bugs and a dusty road film on the forward-facing bumper, grille and hood nose (`BUG_SPLATTER`, texture
-`gh_bugs.png`, in every skin; a skin can override the texture).
+`gh_bugs.png`; clear in the model, filled in by the pine skin only).
 
 ### Skins
 

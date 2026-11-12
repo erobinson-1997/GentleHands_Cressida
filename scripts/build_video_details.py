@@ -1418,8 +1418,9 @@ def interior_colors(k):
 
 # ------------------------------------------------------------------ 16b. highway grime on the front end: dead bugs and road film (Reference Photos/front-end)
 BUG_BOX = (-0.88, 0.88, 0.17, 0.67)              # x0, x1, y0, y1 of the front-on texture
-BUG_SRC = (('f_bumper', 1.0), ('front_bumper_SUB1', 0.9), ('front_bumper_SUB2', 0.5), ('BUMPER_LOWER', 0.9), ('BUMPER_PANEL', 0.75), ('BUMPER_BEAM', 0.5),
-           ('grille_uprights', 0.35), ('radiator_grill', 0.30), ('bonnet', 0.55), ('headlights_part001', 0.25))     # mesh, how many bugs it catches
+BUG_SRC = (('f_bumper', 1.0, 1), ('front_bumper_SUB1', 0.9, 1), ('front_bumper_SUB2', 0.5, 0), ('BUMPER_LOWER', 0.9, 1), ('BUMPER_PANEL', 0.75, 1), ('BUMPER_BEAM', 0.5, 1),
+           ('grille_uprights', 0.35, 0), ('radiator_grill', 0.30, 0), ('bonnet', 0.55, 0), ('headlights_part001', 0.25, 0))   # mesh, how many bugs it catches, road film on it
+_bugs = {}
 BUG_CELL = 0.002
 
 def bug_image(Dn, film, W=4096, H=1152, seed=111):
@@ -1457,7 +1458,7 @@ def bug_image(Dn, film, W=4096, H=1152, seed=111):
 def bug_splatter(k):
     x0, x1, y0, y1 = BUG_BOX; Vs = []; Fs = []; off = 0; rng = np.random.default_rng(109); P = []; Wt = []
     gw, gh = int(round((x1 - x0) / BUG_CELL)), int(round((y1 - y0) / BUG_CELL))
-    for name, wt in BUG_SRC:
+    for name, wt, fw in BUG_SRC:
         n, _, M = k.find(name); w = world_pos(n, M); nr = unit(n.V[:, 3:6].astype(np.float64) @ M[:3, :3]); c = w[n.F].mean(1); fn = nr[n.F].mean(1)
         sel = (fn[:, 2] > 0.20) & (c[:, 2] > 1.80) & (c[:, 1] > y0) & (c[:, 1] < y1)
         if not sel.any(): continue
@@ -1468,16 +1469,16 @@ def bug_splatter(k):
         t = w[F]; area = np.linalg.norm(np.cross(t[:, 1] - t[:, 0], t[:, 2] - t[:, 0]), axis=1); cnt = max(int(area.sum() / 2 / BUG_CELL ** 2 * 6), 1)
         i = rng.choice(len(F), cnt, p=area / area.sum()); a, b = rng.random(cnt), rng.random(cnt); fl = a + b > 1; a[fl] = 1 - a[fl]; b[fl] = 1 - b[fl]
         pts = t[i, 0] + (t[i, 1] - t[i, 0]) * a[:, None] + (t[i, 2] - t[i, 0]) * b[:, None]
-        P.append(pts); Wt.append(np.c_[np.full(cnt, wt), np.clip(fn[sel][i, 2], 0, 1)])
+        P.append(pts); Wt.append(np.c_[np.full(cnt, wt), np.clip(fn[sel][i, 2], 0, 1), np.full(cnt, fw)])
     V = np.vstack(Vs); F = np.vstack(Fs); P = np.vstack(P); Wt = np.vstack(Wt)
     ix = np.clip(((P[:, 0] - x0) / BUG_CELL).astype(int), 0, gw - 1); iy = np.clip(((y1 - P[:, 1]) / BUG_CELL).astype(int), 0, gh - 1)
-    o = np.argsort(P[:, 2]); G = np.zeros((gh, gw, 2)); G[iy[o], ix[o]] = Wt[o]                                   # the frontmost surface wins
-    G = np.stack([gaussian_filter(G[..., j], 1.0) for j in range(2)], -1)
+    o = np.argsort(P[:, 2]); G = np.zeros((gh, gw, 3)); G[iy[o], ix[o]] = Wt[o]                                   # the frontmost surface wins
+    G = np.stack([gaussian_filter(G[..., j], 1.0) for j in range(3)], -1)
     Dn = G[..., 0] * G[..., 1] ** 1.5                                                                             # surfaces square to the wind catch the most
     low = np.clip((0.50 - (y1 - (np.arange(gh) + 0.5) * BUG_CELL)) / 0.30, 0, 1)[:, None]                        # spray from the road dirties the lower bumper most
-    film = (G[..., 0] > 0.01) * (0.12 + 0.30 * low) * np.minimum(G[..., 0] / 0.5, 1)
+    film = gaussian_filter(G[..., 2] * ss(0.25, 0.60, G[..., 1]), 4) * (0.12 + 0.30 * low)          # fades out where the panel turns away, so no hard edge
     im, n = bug_image(Dn, film)
-    k.set_texture('gh_bugs.png', png_bytes(im))
+    _bugs['img'] = im; k.set_texture('gh_bugs.png', png_bytes(Image.new('RGBA', (8, 8), (118, 108, 92, 0))))   # clear here: only the pine skin is dirty
     m = simple_material('gh_bugs', 'gh_bugs.png', 0.45, 0.50, 0.10, 12.0, shader='ksPerPixelAT'); m.blend = 1
     k.add_mesh('BUG_SPLATTER', V, fix_winding(V, F), k.add_material(m), transparent=1, shadows=0)
     return {'tris': len(F), 'bugs': n}
@@ -1579,7 +1580,7 @@ def write_skins():
     wheel_black = flat_texture((15, 15, 16)); wheel_matte = flat_texture((30, 40, 6))        # maps: little specular, broad highlight, next to no reflection
     variants = {
         'silver_176_no_stickers': ('Silver 176 - no stickers', 1, {'gh_sticker.png': clear, 'gh_number_panel.png': clear}),
-        'silver_176_pine': ('Silver 176 - pine needles and sap', 2, {'gh_sticker.png': clear, 'gh_number_panel.png': clear, 'gh_debris.png': png_bytes(pine), 'MKII_Grey.png': wheel_black, 'MKIII_Grey.png': wheel_black,
+        'silver_176_pine': ('Silver 176 - pine needles and sap', 2, {'gh_sticker.png': clear, 'gh_number_panel.png': clear, 'gh_debris.png': png_bytes(pine), 'gh_bugs.png': png_bytes(_bugs['img']), 'MKII_Grey.png': wheel_black, 'MKIII_Grey.png': wheel_black,
                                                                     'SSR_MKII_Map.png': wheel_matte, 'SSR_MKIII_Map.png': wheel_matte}),
     }
     out = {'needle_bundles': needles}
