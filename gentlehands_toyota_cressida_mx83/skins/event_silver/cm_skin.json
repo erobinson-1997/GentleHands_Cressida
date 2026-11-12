@@ -1,0 +1,19 @@
+{
+  "carPaint": {
+    "color": "#FFFFFFFF",
+    "flakes": 0.7,
+    "enabled": true
+  },
+  "clothPiece": {
+    "enabled": true,
+    "colors": [
+      "#352020"
+    ]
+  },
+  "leatherColored": {
+    "enabled": false,
+    "colors": [
+      "#261818"
+    ]
+  }
+}

@@ -15,4 +15,6 @@ HERE=Path(__file__).resolve().parent
 PROJECT=HERE.parent
 ORIGINAL_KN5=Path(os.environ.get('CRESSIDA_ORIGINAL_KN5',PROJECT/'originals'/'ggh_toyota_cressida_mx83_stage_1.kn5'))
 REF_FBX=Path(os.environ.get('CRESSIDA_REF_FBX',PROJECT/'reference'/'advan_model_5s.fbx'))
+# stage-1 model = output of build_rear_damage.py (MD5 e02e7a7c68806a991ada7cf014fc2f8e); input of build_video_details.py
+STAGE1_KN5=Path(os.environ.get('CRESSIDA_STAGE1_KN5',PROJECT/'originals'/'stage1_rear_damage.kn5'))
 OUTPUT_KN5=Path(os.environ.get('CRESSIDA_OUTPUT_KN5',PROJECT/'dist'/'ggh_toyota_cressida_mx83_stage_1.kn5'))
