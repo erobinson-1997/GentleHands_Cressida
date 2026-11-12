@@ -576,19 +576,24 @@ def bumper_end(k):
     """rear bumper ends: plain paint below the moulding line (the paint texture still draws the old bumper's black rub strip
     there) and a closed end on the side moulding where it meets the bumper end, as in the reference photo"""
     tex = [x for x in k.textures if x[1] == 'carpaint_diffuse.dds'][0][2]
-    im = np.asarray(Image.open(io.BytesIO(tex)).convert('RGB')).astype(float); h, wd = im.shape[:2]
-    def colour(uv): return im[(np.mod(uv[:, 1], 1) * (h - 1)).astype(int), (np.mod(uv[:, 0], 1) * (wd - 1)).astype(int)].mean(1)
-    n, _, M = k.find('rest_of_body'); w = world_pos(n, M); c = w[n.F].mean(1); uv = n.V[n.F][:, :, 6:8].mean(1)
-    good = (np.abs(c[:, 0]) > 0.7) & (c[:, 2] < -2.2) & (c[:, 1] > 0.45) & (c[:, 1] < 0.47)
-    lum = colour(uv[good]); ref = np.median(lum); clean = uv[good][np.argmin(np.abs(lum - ref))]
-    info = {}
-    for name, zmax in (('rest_of_body', -2.19), ('rest_of_body_SUB1', -2.19), ('rest_of_body_SUB2', -2.19), ('r_fenders', -2.205)):
-        n, parent, M = k.find(name); w = world_pos(n, M); c = w[n.F].mean(1); uv = n.V[n.F][:, :, 6:8].mean(1)
-        bad = (np.abs(c[:, 0]) > 0.7) & (c[:, 2] < zmax) & (c[:, 1] > 0.355) & (c[:, 1] < 0.452) & (colour(uv) < 0.8 * ref)
-        if not bad.any(): continue
-        V, F = split_mesh(n, bad); V[:, 6:8] = clean
+    im = np.asarray(Image.open(io.BytesIO(tex)).convert('RGB')).astype(float).mean(2); h, wd = im.shape
+    def texel(uv): return (np.mod(uv[..., 1], 1) * (h - 1)).astype(int), (np.mod(uv[..., 0], 1) * (wd - 1)).astype(int)
+    # one flat mid-tone paint texel (between the baked shading below the lip and the lip itself)
+    n, _, M = k.find('rest_of_body'); w = world_pos(n, M); c = w[n.F].mean(1); uvt = n.V[n.F][:, :, 6:8]
+    cand = np.where((c[:, 2] < -2.19) & (c[:, 1] > 0.44))[0]; best = None
+    for i in cand:
+        r, q = texel(uvt[i].mean(0)); patch = im[max(r - 3, 0):r + 4, max(q - 3, 0):q + 4]
+        score = abs(patch.mean() - 46) + 4 * patch.std()
+        if best is None or score < best[0]: best = (score, uvt[i].mean(0))
+    clean = best[1]; info = {}
+    # select by position only (a per-triangle colour test leaves a saw-tooth of dark triangles)
+    for name in ('rest_of_body_SUB1', 'rest_of_body', 'r_fenders'):
+        n, parent, M = k.find(name); w = world_pos(n, M); c = w[n.F].mean(1)
+        if name == 'rest_of_body_SUB1': n.V[:, 6:8] = clean; info[name] = len(n.F); continue
+        sel = (c[:, 2] < (-2.19 if name == 'rest_of_body' else -2.205)) & (np.abs(c[:, 0]) > 0.68) & (c[:, 1] > 0.355) & (c[:, 1] < 0.445)
+        V, F = split_mesh(n, sel); V[:, 6:8] = clean
         m = Node(2, name + '_paint'); m.V = V; m.F = F; m.mat = n.mat; m.flags = n.flags; update_bounds(m); parent.children.append(m)
-        info[name] = int(bad.sum())
+        info[name] = int(sel.sum())
     # close the moulding (black strip + accent cap) where it stops at the bumper end
     caps = []
     for name in ('Object056', 'body_part003'):

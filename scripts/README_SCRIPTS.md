@@ -64,8 +64,8 @@ black with a thin white accent line, as on the real car. Material `gh_trim_accen
 the line sits where the cap faces outward (texture v comes from the world normal's height).
 
 Rear bumper ends (`bumper_end`): the paint texture still draws the old bumper's black rub strip on the bumper ends, so those
-triangles (`rest_of_body`, `rest_of_body_SUB1`, the corner of `r_fenders`) are split off as `*_paint` with their UVs on a clean
-paint texel; the side moulding gets closed ends (`MOULDING_END`) where it stops at the bumper end.
+triangles are chosen by position (the corner band of `rest_of_body` and `r_fenders`, split off as `*_paint`, and all of the
+old strip `rest_of_body_SUB1`) and put on one flat mid-tone paint texel; the side moulding gets closed ends (`MOULDING_END`) where it stops at the bumper end.
 
 ### Skins
 
