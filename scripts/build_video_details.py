@@ -1834,6 +1834,7 @@ def write_skins():
 def build(src, out):
     k = Kn5.load(src); info = {}
     for step in STEPS: info[step] = globals()[step](k)
+    info['pruned_empty_meshes'] = k.prune_empty_meshes()
     k.save(out)
     return info
 
