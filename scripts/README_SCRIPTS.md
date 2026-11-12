@@ -56,6 +56,9 @@ headlight lenses with amber corners, and the broken outer end of the right tail 
 - kn5io.py     full kn5 load/edit/save (round trip is byte-identical); mesh split, subdivide-safe deform helpers
 - preview.py   software render of a kn5 for a quick look without the game: `python scripts/preview.py <kn5> <out_dir> [view ...]`
 
+Front-end grime (`bug_splatter`): dead bugs and a dusty road film on the forward-facing bumper, grille and hood nose (`BUG_SPLATTER`, texture
+`gh_bugs.png`, in every skin; a skin can override the texture).
+
 ### Skins
 
 `build_video_details.py` also writes two skins next to `skins/silver_176` (the base skin: stickers, silver AVS Model 5 wheels):

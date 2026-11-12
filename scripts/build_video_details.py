@@ -15,7 +15,7 @@ import config
 from kn5io import Kn5, Material, Node, world_pos, deform, split_mesh, update_bounds, unit, weld_normals
 
 STEPS = ['mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade', 'door_numbers', 'front_end', 'lower_panel', 'grille', 'clear_lamps', 'taillight_damage', 'trunk_face', 'pinstripe', 'paint_damage',
-         'rear_seat_delete', 'bucket_seat', 'shifter', 'floor_mat', 'head_unit', 'passenger_seat', 'interior_colors', 'debris_layer']
+         'rear_seat_delete', 'bucket_seat', 'shifter', 'floor_mat', 'head_unit', 'passenger_seat', 'interior_colors', 'bug_splatter', 'debris_layer']
 PLATE_TEXT = '8XKQ407'          # made-up number (not the real plate); set to None to keep the original mod's plate
 PLATE_MOSAIC = True             # pixelate the number like a censored photo
 FRONT_PLATE = True              # hangs below the front bumper
@@ -1416,15 +1416,81 @@ def interior_colors(k):
     k.find('chrome1')[0].mat = k.add_material(simple_material('gh_handle_plastic', 'gh_handle_plastic.png', 0.40, 0.45, 0.20, 25.0))
     return {'lower_dash_tris': int(lower.sum())}
 
+# ------------------------------------------------------------------ 16b. highway grime on the front end: dead bugs and road film (Reference Photos/front-end)
+BUG_BOX = (-0.88, 0.88, 0.17, 0.67)              # x0, x1, y0, y1 of the front-on texture
+BUG_SRC = (('f_bumper', 1.0), ('front_bumper_SUB1', 0.9), ('front_bumper_SUB2', 0.5), ('BUMPER_LOWER', 0.9), ('BUMPER_PANEL', 0.75), ('BUMPER_BEAM', 0.5),
+           ('grille_uprights', 0.35), ('radiator_grill', 0.30), ('bonnet', 0.55), ('headlights_part001', 0.25))     # mesh, how many bugs it catches
+BUG_CELL = 0.002
+
+def bug_image(Dn, film, W=4096, H=1152, seed=111):
+    """road film (a dusty brown haze, heavier low down) with dead bugs on it: dark specks, cream and yellow smears, the odd bigger splat"""
+    x0, x1, y0, y1 = BUG_BOX; gh, gw = Dn.shape; rng = np.random.default_rng(seed); sx, sy = W / (x1 - x0), H / (y1 - y0)
+    from scipy.ndimage import zoom
+    up = lambda a: np.clip(zoom(a, (H / gh, W / gw), order=1), 0, None)
+    f = up(film) * (0.55 + 0.9 * noise((H, W), 18, seed + 1)) * (0.75 + 0.5 * noise((H, W), 3, seed + 2))
+    img = np.zeros((H, W, 4)); img[..., :3] = np.array([118, 108, 92]) * (0.85 + 0.3 * noise((H, W), 40, seed + 3))[..., None]; img[..., 3] = np.clip(f, 0, 0.55) * 255
+    im = Image.fromarray(img.astype(np.uint8), 'RGBA'); d = ImageDraw.Draw(im)
+    p = Dn.ravel() / Dn.sum(); n = int(9000 * Dn.sum() * BUG_CELL ** 2); i = rng.choice(Dn.size, n, p=p); r, c = np.divmod(i, gw)
+    xs = x0 + (c + rng.random(n)) * BUG_CELL; ys = y1 - (r + rng.random(n)) * BUG_CELL
+    P = lambda x, y: ((x - x0) * sx, (y1 - y) * sy)
+    def blob(x, y, rad, col, a=255):
+        cx, cy = P(x, y); d.ellipse((cx - rad * sx, cy - rad * sy, cx + rad * sx, cy + rad * sy), fill=tuple(int(v) for v in col) + (a,))
+    tone = lambda col: np.clip(np.array(col) * rng.uniform(0.8, 1.15), 0, 255)
+    for x, y in zip(xs, ys):
+        t = rng.random()
+        if t < 0.30: blob(x, y, rng.uniform(0.0003, 0.0009), tone((38, 32, 26)))                                 # dark specks
+        elif t < 0.62: blob(x, y, rng.uniform(0.0003, 0.0008), tone((212, 204, 178)))                           # pale specks
+        elif t < 0.96:                                                                                          # guts: a cream or yellow smear, swept outwards by the air
+            col = tone((206, 196, 150) if rng.random() < 0.6 else (176, 164, 92)); rad = rng.uniform(0.0007, 0.0020)
+            dx = np.sign(x) * rng.uniform(0.3, 1.0) + rng.normal(0, 0.3); dy = rng.uniform(0.2, 1.0); L = rng.uniform(1.0, 3.5) * rad; nn = np.hypot(dx, dy)
+            for s in np.linspace(0, 1, 5): blob(x + dx / nn * L * s, y + dy / nn * L * s, rad * (1 - 0.6 * s), col, int(255 - 70 * s))
+            if rng.random() < 0.4: blob(x, y, rad * 0.45, tone((52, 44, 32)))
+        else:                                                                                                   # a bigger splat with droplets thrown round it
+            rad = rng.uniform(0.0012, 0.0026); col = tone((190, 176, 120))
+            for _ in range(rng.integers(3, 7)):                                                                 # an irregular lump, not a ring
+                blob(x + rng.normal(0, rad * 0.6), y + rng.normal(0, rad * 0.6), rad * rng.uniform(0.3, 0.7), col)
+            for _ in range(rng.integers(1, 4)):
+                a = rng.uniform(0, 2 * np.pi); q = rng.uniform(1.4, 2.6) * rad; blob(x + q * np.cos(a), y + q * np.sin(a), rad * rng.uniform(0.1, 0.25), col)
+            if rng.random() < 0.5: blob(x + rng.normal(0, rad * 0.4), y + rng.normal(0, rad * 0.4), rad * rng.uniform(0.2, 0.4), tone((60, 48, 34)))
+    return im, n
+
+def bug_splatter(k):
+    x0, x1, y0, y1 = BUG_BOX; Vs = []; Fs = []; off = 0; rng = np.random.default_rng(109); P = []; Wt = []
+    gw, gh = int(round((x1 - x0) / BUG_CELL)), int(round((y1 - y0) / BUG_CELL))
+    for name, wt in BUG_SRC:
+        n, _, M = k.find(name); w = world_pos(n, M); nr = unit(n.V[:, 3:6].astype(np.float64) @ M[:3, :3]); c = w[n.F].mean(1); fn = nr[n.F].mean(1)
+        sel = (fn[:, 2] > 0.20) & (c[:, 2] > 1.80) & (c[:, 1] > y0) & (c[:, 1] < y1)
+        if not sel.any(): continue
+        F = n.F[sel]; used = np.unique(F); re = np.full(len(w), -1); re[used] = np.arange(len(used))
+        V = np.zeros((len(used), 11)); V[:, :3] = w[used] + nr[used] * 0.0012; V[:, 3:6] = nr[used]
+        V[:, 6] = (w[used, 0] - x0) / (x1 - x0); V[:, 7] = (y1 - w[used, 1]) / (y1 - y0); V[:, 8:11] = [1, 0, 0]
+        Vs.append(V); Fs.append(re[F] + off); off += len(V)
+        t = w[F]; area = np.linalg.norm(np.cross(t[:, 1] - t[:, 0], t[:, 2] - t[:, 0]), axis=1); cnt = max(int(area.sum() / 2 / BUG_CELL ** 2 * 6), 1)
+        i = rng.choice(len(F), cnt, p=area / area.sum()); a, b = rng.random(cnt), rng.random(cnt); fl = a + b > 1; a[fl] = 1 - a[fl]; b[fl] = 1 - b[fl]
+        pts = t[i, 0] + (t[i, 1] - t[i, 0]) * a[:, None] + (t[i, 2] - t[i, 0]) * b[:, None]
+        P.append(pts); Wt.append(np.c_[np.full(cnt, wt), np.clip(fn[sel][i, 2], 0, 1)])
+    V = np.vstack(Vs); F = np.vstack(Fs); P = np.vstack(P); Wt = np.vstack(Wt)
+    ix = np.clip(((P[:, 0] - x0) / BUG_CELL).astype(int), 0, gw - 1); iy = np.clip(((y1 - P[:, 1]) / BUG_CELL).astype(int), 0, gh - 1)
+    o = np.argsort(P[:, 2]); G = np.zeros((gh, gw, 2)); G[iy[o], ix[o]] = Wt[o]                                   # the frontmost surface wins
+    G = np.stack([gaussian_filter(G[..., j], 1.0) for j in range(2)], -1)
+    Dn = G[..., 0] * G[..., 1] ** 1.5                                                                             # surfaces square to the wind catch the most
+    low = np.clip((0.50 - (y1 - (np.arange(gh) + 0.5) * BUG_CELL)) / 0.30, 0, 1)[:, None]                        # spray from the road dirties the lower bumper most
+    film = (G[..., 0] > 0.01) * (0.12 + 0.30 * low) * np.minimum(G[..., 0] / 0.5, 1)
+    im, n = bug_image(Dn, film)
+    k.set_texture('gh_bugs.png', png_bytes(im))
+    m = simple_material('gh_bugs', 'gh_bugs.png', 0.45, 0.50, 0.10, 12.0, shader='ksPerPixelAT'); m.blend = 1
+    k.add_mesh('BUG_SPLATTER', V, fix_winding(V, F), k.add_material(m), transparent=1, shadows=0)
+    return {'tris': len(F), 'bugs': n}
+
 # ------------------------------------------------------------------ 17. skins: stickers / no stickers / pine needles and sap
 # A skin can only swap textures, so everything a skin switches lives in a texture of its own:
 #   stickers       gh_sticker.png, gh_number_panel.png (alpha tested: a clear texture hides them)
 #   wheels         MKII_Grey.png / MKIII_Grey.png (colour), SSR_MKII_Map.png / SSR_MKIII_Map.png (shine)
 #   pine debris    gh_debris.png on DEBRIS_LAYER, a shell 2.5 mm above the top of the car; clear in the model itself
 SKINS = config.PROJECT / 'gentlehands_toyota_cressida_mx83' / 'skins'; BASE_SKIN = 'silver_176'
-DEBRIS_BOX = (-0.96, 0.96, -2.50, 2.14)         # x0, x1, z0, z1 covered by the top-down debris texture
+DEBRIS_BOX = (-0.96, 0.96, -2.50, 2.20)         # x0, x1, z0, z1 covered by the top-down debris texture
 DEBRIS_SRC = (('bonnet', 0.60), ('roof', 0.60), ('trunk', 0.60), ('r_fenders', 0.60), ('f_fenders', 0.60), ('rear_doors', 0.60), ('lf_door', 0.60),
-              ('rf_door', 0.60), ('wiper_part001', 0.45), ('window_ext', 0.60))      # mesh, how far its normal must point up
+              ('rf_door', 0.60), ('wiper_part001', 0.45), ('window_ext', 0.60), ('f_bumper', 0.60), ('front_bumper_SUB1', 0.60))      # mesh, how far its normal must point up
 DEBRIS_CELL = 0.004
 _debris = {}
 
@@ -1432,7 +1498,7 @@ def debris_layer(k):
     x0, x1, z0, z1 = DEBRIS_BOX; Vs = []; Fs = []; off = 0; rng = np.random.default_rng(101); P = []; K = []
     for name, thr in DEBRIS_SRC:
         n, _, M = k.find(name); w = world_pos(n, M); nr = unit(n.V[:, 3:6].astype(np.float64) @ M[:3, :3]); c = w[n.F].mean(1)
-        sel = (nr[n.F].mean(1)[:, 1] > thr) & (c[:, 1] > 0.55)
+        sel = (nr[n.F].mean(1)[:, 1] > thr) & (c[:, 1] > (0.38 if 'bumper' in name else 0.55))
         F = n.F[sel]; used = np.unique(F); re = np.full(len(w), -1); re[used] = np.arange(len(used))
         V = np.zeros((len(used), 11)); V[:, :3] = w[used] + nr[used] * 0.0025; V[:, 3:6] = nr[used]
         V[:, 6] = (w[used, 0] - x0) / (x1 - x0); V[:, 7] = (w[used, 2] - z0) / (z1 - z0); V[:, 8:11] = [1, 0, 0]
