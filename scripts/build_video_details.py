@@ -15,7 +15,7 @@ import config
 from kn5io import Kn5, Material, Node, world_pos, deform, split_mesh, update_bounds, unit, weld_normals
 
 STEPS = ['mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade', 'door_numbers', 'front_end', 'lower_panel', 'grille', 'clear_lamps', 'taillight_damage', 'trunk_face', 'pinstripe', 'paint_damage',
-         'rear_seat_delete', 'bucket_seat', 'shifter', 'floor_mat', 'head_unit', 'passenger_seat', 'interior_colors', 'bug_splatter', 'debris_layer', 'side_trim', 'bumper_end']
+         'rear_seat_delete', 'bucket_seat', 'shifter', 'floor_mat', 'head_unit', 'passenger_seat', 'interior_colors', 'bug_splatter', 'debris_layer', 'side_trim', 'bumper_end', 'end_plates']
 PLATE_TEXT = '8XKQ407'          # made-up number (not the real plate); set to None to keep the original mod's plate
 PLATE_MOSAIC = True             # pixelate the number like a censored photo
 FRONT_PLATE = True              # hangs below the front bumper
@@ -614,6 +614,47 @@ def bumper_end(k):
         V = np.array(V, np.float32); F = fix_winding(V, F)
         k.add_mesh('MOULDING_END', V, F, mat); info['caps'] = info.get('caps', 0) + 1
     return info
+
+def end_plates(k):
+    """rear corners with the bumper cover gone (reference photos, rear bumper): the old bumper-top block at moulding height is
+    flattened into a flat bare end plate flush with the quarter panel, with two green grommets"""
+    n, _, M = k.find('rest_of_body'); w = world_pos(n, M)
+    info = {}
+    for side in (1, -1):
+        # plan line of the plate: the outer surface of the lip under the taillight (y 0.455-0.47), as x(z)
+        s = (side * w[:, 0] > 0.7) & (w[:, 1] > 0.455) & (w[:, 1] < 0.47) & (w[:, 2] < -2.20) & (w[:, 2] > -2.31)
+        zz = np.linspace(-2.305, -2.205, 11); xs = []
+        for z in zz:
+            q = s & (np.abs(w[:, 2] - z) < 0.008)
+            xs.append(np.abs(w[q, 0]).max() if q.any() else np.nan)
+        ok = ~np.isnan(xs); coef = np.polyfit(zz[ok], np.array(xs)[ok], 2)
+        def xplate(z): return np.polyval(coef, np.clip(z, -2.31, -2.205))
+        def ss(a, b, x): x = np.clip((x - a) / (b - a), 0, 1); return x * x * (3 - 2 * x)
+        def fn(p, side=side, inset=0.0):
+            x = side * p[:, 0]; y = p[:, 1]; z = p[:, 2]
+            wgt = (x > 0.7) * ss(-2.300, -2.262, z) * (z < -2.203) * ss(0.285, 0.335, y) * (1 - ss(0.462, 0.472, y))
+            q = p.copy(); q[:, 0] = side * (x + (xplate(z) - inset - x) * wgt); return q
+        for name in ('rest_of_body', 'rest_of_body_paint', 'rest_of_body_SUB1', 'rest_of_body_SUB2', 'r_fenders_paint'):
+            nd, _, Mn = k.find(name); f = (lambda p, f0=fn: f0(p, inset=0.0008)) if 'SUB' in name else fn  # old strip just behind: fills gaps only
+            info[name] = info.get(name, 0) + deform(nd, Mn, f)
+        # grommets: green rubber rings on the plate near its front edge
+        for gy in (0.418, 0.322):
+            gz = -2.232; gx = xplate(gz) + 0.0015; b = Builder(); seg = 16; r0, r1 = 0.0075, 0.0035
+            ring = lambda r, d: [(side * (gx + d), gy + r * np.cos(2 * np.pi * i / seg), gz + r * np.sin(2 * np.pi * i / seg)) for i in range(seg)]
+            outer, top, hole = ring(r0, 0.0), ring(r0 * 0.8, 0.003), ring(r1, 0.0025)
+            for i in range(seg):
+                j = (i + 1) % seg
+                b.poly([outer[i], outer[j], top[j], top[i]], (side, 0, 0), [(0.5, 0.5)] * 4)
+                b.poly([top[i], top[j], hole[j], hole[i]], (side, 0, 0), [(0.5, 0.5)] * 4)
+            V, F = b.done(); V[:, 3:6] = (side, 0, 0); F = fix_winding(V, F)
+            k.add_mesh('GROMMET_%s_%d' % ('L' if side > 0 else 'R', int(gy * 1000)), V, F, _grommet_mat(k), shadows=0)
+    return info
+
+def _grommet_mat(k):
+    if 'gh_grommet' not in [m.name for m in k.materials]:
+        k.set_texture('gh_grommet.png', flat_texture((38, 120, 62)))
+        k.add_material(simple_material('gh_grommet', 'gh_grommet.png', 0.45, 0.55, 0.35, 30.0))
+    return k.mat_id('gh_grommet')
 
 def grille(k):
     info = {}

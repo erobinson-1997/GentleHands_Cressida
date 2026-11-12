@@ -67,6 +67,12 @@ Rear bumper ends (`bumper_end`): the paint texture still draws the old bumper's 
 triangles are chosen by position (the corner band of `rest_of_body` and `r_fenders`, split off as `*_paint`, and all of the
 old strip `rest_of_body_SUB1`) and put on one flat mid-tone paint texel; the side moulding gets closed ends (`MOULDING_END`) where it stops at the bumper end.
 
+Rear end plates (`end_plates`): with the bumper cover gone (Reference Photos/rear bumper) each rear corner is a flat bare end
+plate. The old bumper-top block at moulding height is flattened onto the plan line of the lip under the taillight (fitted per
+side, so the crushed right corner stays crushed), blending back to the original shape at the bottom tuck and round the corner
+to the back; the old strip pieces (`rest_of_body_SUB1/2`) sit 0.8 mm behind and only fill gaps. Two green grommets per plate
+(`GROMMET_*`, material `gh_grommet`).
+
 ### Skins
 
 `build_video_details.py` also writes two skins next to `skins/event_silver` (Event Silver, the base skin: stickers, silver AVS Model 5 wheels):
