@@ -1120,6 +1120,7 @@ def bucket_seat_image(S, q, i_sh, s_wrap, length, size=1024, seed=41):
     over((236, 200, 206), 0.35 * mask(lambda d: [d.line([(a[0] + 5, a[1] + 5), (b_[0] + 5, b_[1] + 5)], fill=255, width=4) for a, b_ in seams], 2.0))
     # the print on the headrest (Reference Photos/seat and shifter)
     sl = 0.925; wl = np.interp(sl, S, q[:, 2]); lc, la = seat_logo(0.46 * W / (2 * wl) / 1000, 0.98 * H / length / 1000)
+    lc, la = lc[::-1], la[::-1]                                                                                 # the texture's rows run up the seat
     cx, cy = int(px(0.0)), int(row(sl)); h_, w_ = la.shape; y0_, x0_ = cy - h_ // 2, cx - w_ // 2
     reg = img[y0_:y0_ + h_, x0_:x0_ + w_]; aa = 0.88 * la[..., None]; reg[:] = reg * (1 - aa) + lc * aa
     # grime: grey where shoulders, head and hands rub; darker towards the edges of the shell
