@@ -7,14 +7,12 @@ This is a car mod for Assetto Corsa based on my 1989 Toyota Cressida.
 
 <img width="1388" height="800" alt="image" src="https://github.com/user-attachments/assets/75cf3e86-93e7-456e-8de7-71fc4607744e" />
 
-
 ## Known issues / notes
 - Power and torque figures are estimates, not measured dyno numbers.
 - Top speed and acceleration in the car's info screen are not filled in yet.
 
 # Preview
-<img width="1022" height="575" alt="__custom_showroom_1794198099" src="https://github.com/user-attachments/assets/770e0b1c-e06e-40dd-b588-ed3d50c0477e" />
-<img width="2560" height="1440" alt="Screenshot_gentlehands_toyota_cressida_mx83_brooklyn park_8-10-126-20-22-41" src="https://github.com/user-attachments/assets/376fbc87-4d38-4cb9-ad15-32d038e61a00" />
-<img width="2560" height="1440" alt="Screenshot_gentlehands_toyota_cressida_mx83_brooklyn park_8-10-126-19-25-34" src="https://github.com/user-attachments/assets/57439440-4079-40e0-9181-23e9e12f0bfc" />
-
-
+<img width="1586" height="893" alt="Screenshot 2026-11-11 193309" src="https://github.com/user-attachments/assets/41f72b26-2fe4-4c56-9fc3-5a8473160615" />
+<img width="1586" height="893" alt="Screenshot 2026-11-11 193241" src="https://github.com/user-attachments/assets/8f0cd29a-be23-48fd-9de9-fb379f16d830" />
+<img width="1586" height="893" alt="Screenshot 2026-11-11 193236" src="https://github.com/user-attachments/assets/4b68bcdb-3555-436c-a472-b037a7bb8f33" />
+<img width="1586" height="893" alt="Screenshot 2026-11-11 193246" src="https://github.com/user-attachments/assets/0253f507-f970-4bf9-bab8-1d8b8cff9e25" />
