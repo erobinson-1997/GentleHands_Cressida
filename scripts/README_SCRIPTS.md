@@ -61,7 +61,7 @@ headlight lenses with amber corners, and the broken outer end of the right tail 
 `build_video_details.py` also writes two skins next to `skins/silver_176` (the base skin: stickers, silver AVS Model 5 wheels):
 
 - `silver_176_no_stickers` - clear `gh_sticker.png` and `gh_number_panel.png` hide the window sticker and the door numbers.
-- `silver_176_pine` - `gh_debris.png` (pine needles, sap, grit) shows on `DEBRIS_LAYER`, a shell just above the top of the car that is clear in the model itself; flat
+- `silver_176_pine` - no stickers either; `gh_debris.png` (pine needles, sap, grit) shows on `DEBRIS_LAYER`, a shell just above the top of the car that is clear in the model itself; flat
   wheel textures (`MKII_Grey.png`, `MKIII_Grey.png`, `SSR_*_Map.png`) make the wheels matte black.
 
 A skin can only swap textures, so other wheel designs need their own 3D model. `preview.jpg` / `livery.png` are copied from the base skin only when missing:

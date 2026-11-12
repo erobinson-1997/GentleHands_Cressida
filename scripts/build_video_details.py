@@ -1458,11 +1458,14 @@ def debris_density(H, kind):
     Hs = gaussian_filter(np.where(cov, H, 0.0), 6) / np.maximum(gaussian_filter(cov.astype(float), 6), 1e-3)
     D = np.where(kind == 1, 22.0, 0.0) + np.where(kind == 2, 6.0, 0.0)
     D += 60.0 * np.clip((Hs - H) / 0.006, 0, 1) * (kind == 1)                               # panel gaps, gutters
+    # it gathers in the corners and thins out towards the middle, more on one side than the other, in clumps
+    xc = DEBRIS_BOX[0] + (np.arange(H.shape[1]) + 0.5) * DEBRIS_CELL; lump = noise((1, H.shape[1]), 9, 107)[0]
+    side = (0.10 + 1.25 * np.clip(np.abs(xc + 0.06) / 0.66, 0, 1) ** 1.8) * np.where(xc > 0, 0.74, 0.60) * (0.35 + 1.3 * lump)
     pool = (kind == 3).astype(float)                                                        # the cowl itself is all but hidden under the hood's rear edge,
     for rows, heap in ((zrow > -0.5, 1.0), (zrow < -0.5, 0.0)):                             # so the mat lies along the foot of the windscreen, round the wipers
         g = (kind == 2) & rows[:, None]; foot = np.where(g, H, np.inf).min(0); foot = np.where(np.isfinite(foot), foot, 0.0)
         lift = np.where(g, H - foot[None], 1.0)
-        pool += heap * np.exp(-(lift / 0.024) ** 2); D += np.where(g, 220.0 * np.exp(-lift / 0.012), 0.0)
+        pool += heap * side[None] * np.exp(-(lift / (0.012 + 0.016 * np.minimum(side, 1.3))[None]) ** 2); D += np.where(g, 220.0 * np.exp(-lift / 0.012), 0.0)
     return D * cov, 15000.0 * pool * cov
 
 def debris_image(W=2048, Hpx=4096, seed=103):
@@ -1510,7 +1513,7 @@ def write_skins():
     wheel_black = flat_texture((15, 15, 16)); wheel_matte = flat_texture((30, 40, 6))        # maps: little specular, broad highlight, next to no reflection
     variants = {
         'silver_176_no_stickers': ('Silver 176 - no stickers', 1, {'gh_sticker.png': clear, 'gh_number_panel.png': clear}),
-        'silver_176_pine': ('Silver 176 - pine needles and sap', 2, {'gh_debris.png': png_bytes(pine), 'MKII_Grey.png': wheel_black, 'MKIII_Grey.png': wheel_black,
+        'silver_176_pine': ('Silver 176 - pine needles and sap', 2, {'gh_sticker.png': clear, 'gh_number_panel.png': clear, 'gh_debris.png': png_bytes(pine), 'MKII_Grey.png': wheel_black, 'MKIII_Grey.png': wheel_black,
                                                                     'SSR_MKII_Map.png': wheel_matte, 'SSR_MKIII_Map.png': wheel_matte}),
     }
     out = {'needle_bundles': needles}
