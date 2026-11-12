@@ -345,7 +345,7 @@ def hood_fade(k):
     rgb = Image.fromarray(np.clip(a[..., :3], 0, 255).astype(np.uint8), 'RGB')
     dds = dxt5_with_mips(rgb, Image.fromarray(a[..., 3].astype(np.uint8)), t[2][:128])
     assert len(dds) == len(t[2]); t[2] = dds
-    skin = config.PROJECT / 'gentlehands_toyota_cressida_mx83' / 'skins' / 'silver_176' / 'carpaint_diffuse.dds'
+    skin = config.PROJECT / 'gentlehands_toyota_cressida_mx83' / 'skins' / 'event_silver' / 'carpaint_diffuse.dds'
     if skin.exists(): skin.write_bytes(dds)                       # the skin's copy overrides the one inside the kn5
     return {'texels': [px0, py0, px1, py1], 'coverage': round(float((m > 0.3).mean()), 2), 'skin': skin.exists()}
 
@@ -1610,7 +1610,7 @@ def bug_splatter(k):
 #   stickers       gh_sticker.png, gh_number_panel.png (alpha tested: a clear texture hides them)
 #   wheels         MKII_Grey.png / MKIII_Grey.png (colour), SSR_MKII_Map.png / SSR_MKIII_Map.png (shine)
 #   pine debris    gh_debris.png on DEBRIS_LAYER, a shell 2.5 mm above the top of the car; clear in the model itself
-SKINS = config.PROJECT / 'gentlehands_toyota_cressida_mx83' / 'skins'; BASE_SKIN = 'silver_176'
+SKINS = config.PROJECT / 'gentlehands_toyota_cressida_mx83' / 'skins'; BASE_SKIN = 'event_silver'
 DEBRIS_BOX = (-0.96, 0.96, -2.50, 2.20)         # x0, x1, z0, z1 covered by the top-down debris texture
 DEBRIS_SRC = (('bonnet', 0.60), ('roof', 0.60), ('trunk', 0.60), ('r_fenders', 0.60), ('f_fenders', 0.60), ('rear_doors', 0.60), ('lf_door', 0.60),
               ('rf_door', 0.60), ('wiper_part001', 0.45), ('window_ext', 0.60), ('f_bumper', 0.60), ('front_bumper_SUB1', 0.60))      # mesh, how far its normal must point up
@@ -1701,8 +1701,8 @@ def write_skins():
     clear = png_bytes(Image.new('RGBA', (8, 8), (0, 0, 0, 0))); pine, needles = debris_image()
     wheel_black = flat_texture((15, 15, 16)); wheel_matte = flat_texture((30, 40, 6))        # maps: little specular, broad highlight, next to no reflection
     variants = {
-        'silver_176_no_stickers': ('Silver 176 - no stickers', 1, {'gh_sticker.png': clear, 'gh_number_panel.png': clear}),
-        'silver_176_pine': ('Silver 176 - pine needles and sap', 2, {'gh_sticker.png': clear, 'gh_number_panel.png': clear, 'gh_debris.png': png_bytes(pine), 'gh_bugs.png': png_bytes(_bugs['img']), 'MKII_Grey.png': wheel_black, 'MKIII_Grey.png': wheel_black,
+        'clean_silver': ('Clean Silver', 1, {'gh_sticker.png': clear, 'gh_number_panel.png': clear}),
+        'mountain_silver': ('Mountain Silver', 2, {'gh_sticker.png': clear, 'gh_number_panel.png': clear, 'gh_debris.png': png_bytes(pine), 'gh_bugs.png': png_bytes(_bugs['img']), 'MKII_Grey.png': wheel_black, 'MKIII_Grey.png': wheel_black,
                                                                     'SSR_MKII_Map.png': wheel_matte, 'SSR_MKIII_Map.png': wheel_matte}),
     }
     out = {'needle_bundles': needles}

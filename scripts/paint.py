@@ -5,7 +5,7 @@ The original 128-byte DDS header is reused byte for byte."""
 import io, numpy as np
 from PIL import Image
 TINT=np.array([0xB5,0xBA,0xBD])/255.0*0.45*np.array([0.90,0.97,1.10])  # = ~#49515E cool dark silver, picked in-game 2026-11-08 (test skin f_cool_darker)
-# Lighter values (e.g. #B5B8BC) read as WHITE in-game under AC's auto exposure. Keep skins/silver_176/metal_detail.dds
+# Lighter values (e.g. #B5B8BC) read as WHITE in-game under AC's auto exposure. Keep skins/event_silver/metal_detail.dds
 # neutral white: the game multiplies the detail colour onto this, so a coloured detail tints the paint twice.
 
 def make_paint_dds(orig):
