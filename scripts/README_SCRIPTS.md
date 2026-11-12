@@ -59,6 +59,10 @@ headlight lenses with amber corners, and the broken outer end of the right tail 
 Front-end grime (`bug_splatter`): dead bugs and a dusty road film on the forward-facing bumper, grille and hood nose (`BUG_SPLATTER`, texture
 `gh_bugs.png`; clear in the model, filled in by the pine skin only).
 
+Side mouldings (`side_trim`): the chrome cap on top of the black side moulding (front bumper, fenders, doors, rear quarters) is
+black with a thin white accent line, as on the real car. Material `gh_trim_accent` (a copy of `black` with `gh_trim_accent.png`);
+the line sits where the cap faces outward (texture v comes from the world normal's height).
+
 ### Skins
 
 `build_video_details.py` also writes two skins next to `skins/event_silver` (Event Silver, the base skin: stickers, silver AVS Model 5 wheels):

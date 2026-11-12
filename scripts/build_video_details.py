@@ -15,7 +15,7 @@ import config
 from kn5io import Kn5, Material, Node, world_pos, deform, split_mesh, update_bounds, unit, weld_normals
 
 STEPS = ['mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade', 'door_numbers', 'front_end', 'lower_panel', 'grille', 'clear_lamps', 'taillight_damage', 'trunk_face', 'pinstripe', 'paint_damage',
-         'rear_seat_delete', 'bucket_seat', 'shifter', 'floor_mat', 'head_unit', 'passenger_seat', 'interior_colors', 'bug_splatter', 'debris_layer']
+         'rear_seat_delete', 'bucket_seat', 'shifter', 'floor_mat', 'head_unit', 'passenger_seat', 'interior_colors', 'bug_splatter', 'debris_layer', 'side_trim']
 PLATE_TEXT = '8XKQ407'          # made-up number (not the real plate); set to None to keep the original mod's plate
 PLATE_MOSAIC = True             # pixelate the number like a censored photo
 FRONT_PLATE = True              # hangs below the front bumper
@@ -543,6 +543,34 @@ def badge_image(w=512, h=256):
     sh = Image.new('RGBA', g.size, edge); sh.putalpha(g.filter(ImageFilter.MaxFilter(5))); im.alpha_composite(sh, (170, 93))
     tx = Image.new('RGBA', g.size, silver); tx.putalpha(g); im.alpha_composite(tx, (170, 93))
     return im
+
+TRIM_WHOLE = ('fender_front_part003', 'body_part003', 'front_bumper_SUB2')    # the chrome cap of the side moulding
+
+def trim_image(h=64):
+    """across the moulding cap: black, a thin white line where the cap faces out, black (v = 0 faces up, 1 down)"""
+    v = (np.arange(h) + 0.5) / h; line = np.clip(1 - np.abs(v - 0.50) / 0.16, 0, 1) ** 0.6
+    rgb = (14 + (226 - 14) * np.clip(line * 1.6, 0, 1)).astype(np.uint8)
+    return Image.fromarray(np.repeat(np.repeat(rgb[:, None, None], 3, 2), 8, 1), 'RGB')
+
+def side_trim(k):
+    """side mouldings: black with a white accent line (the reference photos), not chrome"""
+    k.set_texture('gh_trim_accent.png', png_bytes(trim_image()))
+    m = k.materials[k.mat_id('black')].copy('gh_trim_accent'); m.tex = [list(x) for x in m.tex]
+    for x in m.tex:
+        if x[0] == 'txDiffuse': x[2] = 'gh_trim_accent.png'
+    mid = k.add_material(m); chrome = k.mat_id('chrome'); info = {}
+    for n, parent, M in list(k.root.walk()):
+        if n.type != 2 or n.mat != chrome or not (n.name in TRIM_WHOLE or n.name.startswith('door_')): continue
+        w = world_pos(n, M); c = w[n.F].mean(1)
+        sel = np.ones(len(n.F), bool) if n.name in TRIM_WHOLE else (c[:, 1] < 0.46) & (np.abs(c[:, 0]) > 0.80)
+        if not sel.any(): continue
+        if sel.all(): t = n; V = n.V
+        else:
+            V, F = split_mesh(n, sel); t = Node(2, n.name + '_trim'); t.V = V; t.F = F; t.flags = n.flags; parent.children.append(t)
+        nw = unit(V[:, 3:6].astype(np.float64) @ M[:3, :3])                     # world normals: up -> v 0, out -> 0.5
+        V[:, 6] = 0.5; V[:, 7] = np.clip(0.5 - 0.62 * nw[:, 1], 0.01, 0.99)
+        t.mat = mid; update_bounds(t); info[n.name] = len(t.F)
+    return info
 
 def grille(k):
     info = {}
