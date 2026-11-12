@@ -111,6 +111,7 @@ class Kn5:
                 w(np.asarray(n.matrix, dtype='<f4').tobytes())
             else:
                 assert len(n.V) < 65536, n.name + ': too many vertices for one mesh'
+                assert len(n.V) and len(n.F), n.name + ': empty mesh (AC crashes creating a zero-size GPU buffer); call prune_empty_meshes()'
                 w(struct.pack('<3B', *n.flags)); w(struct.pack('<i', len(n.V))); w(np.asarray(n.V, dtype='<f4').tobytes())
                 F = np.asarray(n.F).reshape(-1)
                 w(struct.pack('<i', len(F))); w(F.astype('<u2').tobytes())
@@ -128,6 +129,18 @@ class Kn5:
         hits = [t for t in s.root.walk() if t[0].name == name and t[0].type == type_]
         assert len(hits) == 1, '%s: %d matches' % (name, len(hits))
         return hits[0]
+
+    def prune_empty_meshes(s):
+        """remove mesh nodes left with no triangles (AC cannot create a zero-size buffer and crashes on load) -> their names"""
+        gone = []
+        def walk(n):
+            keep = []
+            for c in n.children:
+                if c.type == 2 and (c.V is None or len(c.V) == 0 or len(c.F) == 0): gone.append(c.name); continue
+                walk(c); keep.append(c)
+            n.children = keep
+        walk(s.root)
+        return gone
 
     def mat_id(s, name):
         return [m.name for m in s.materials].index(name)
