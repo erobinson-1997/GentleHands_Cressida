@@ -1073,7 +1073,35 @@ def seat_point(q, nrm, i, u, lift=0.0, back=False):
     z, y, w, h = q[i]; off = -(0.020 + 0.040 * (1 - u * u)) - lift if back else h * ss(0.50, 0.98, abs(u)) + lift
     return np.array([SEAT_X + w * u, y + nrm[i, 1] * off, z + nrm[i, 0] * off])
 
-def bucket_seat_image(S, q, i_sh, size=1024, seed=41):
+def seat_edge_point(q, nrm, i, u, phi):
+    """the rounded outer edge of the shell, phi = 0 on the front face to pi on the back face"""
+    z, y, w, h = q[i]; of, ob = h, -0.020; m, a = (of + ob) / 2, (of - ob) / 2; off = m + a * np.cos(phi); sg = np.sign(u)
+    return np.array([SEAT_X + sg * (w + min(a, 0.022) * np.sin(phi)), y + nrm[i, 1] * off, z + nrm[i, 0] * off])
+
+WRAP_U = 0.80                     # on the back, the cover wraps this far in from the sides (|u| beyond it is cloth) ...
+
+def seat_logo(px_mm_x, px_mm_y, d_mm=100):
+    """the NRG Prisma print: a dark ring, NR>>G across its top, 'Prisma' in red brush script over it with drips; drawn true to size, then
+    squeezed to the texture's scale. Returns (rgb, alpha) arrays"""
+    k_ = 4; Sz = int(d_mm * 1.5 * k_); c = Sz / 2; R = d_mm / 2 * k_
+    col = Image.new('RGB', (Sz, Sz), (40, 26, 32)); a = Image.new('L', (Sz, Sz), 0); da = ImageDraw.Draw(a); dc = ImageDraw.Draw(col)
+    da.ellipse((c - R, c - R, c + R, c + R), outline=255, width=int(2.4 * k_))
+    da.ellipse((c - R * 0.86, c - R * 0.86, c + R * 0.86, c + R * 0.86), outline=255, width=int(1.0 * k_))
+    f1 = font(['arialbd.ttf'], int(16 * k_)); da.text((c, c - R * 0.40), 'NR\u00bbG', font=f1, fill=255, anchor='mm')
+    # 'Prisma' goes on in red, so it is cut out of the dark ring first
+    pr = Image.new('L', (Sz, Sz), 0); dp = ImageDraw.Draw(pr); f2 = font(['Inkfree.ttf', 'segoescb.ttf'], int(30 * k_))
+    dp.text((c, c + R * 0.10), 'Prisma', font=f2, fill=255, anchor='mm', stroke_width=int(1.2 * k_), stroke_fill=255)
+    rng = np.random.default_rng(7); y0 = c + R * 0.36
+    for x in np.linspace(c - R * 0.62, c + R * 0.62, 9):                                                         # drips under it
+        L = rng.uniform(0.10, 0.30) * R; x += rng.normal(0, 2 * k_); dp.line([(x, y0), (x, y0 + L)], fill=255, width=int(1.1 * k_))
+        dp.ellipse((x - 1.6 * k_, y0 + L - 1.6 * k_, x + 1.6 * k_, y0 + L + 1.6 * k_), fill=255)
+    dp.line([(c - R * 0.70, y0), (c + R * 0.70, y0 - 2 * k_)], fill=255, width=int(1.2 * k_))
+    pr = pr.rotate(6, resample=Image.BICUBIC, center=(c, c))
+    a = ImageChops.subtract(a, pr.filter(ImageFilter.MaxFilter(9))); a = ImageChops.lighter(a, pr); col.paste((176, 34, 56), (0, 0), pr)
+    size = (max(int(Sz / k_ * px_mm_x), 8), max(int(Sz / k_ * px_mm_y), 8))
+    return np.asarray(col.resize(size, Image.LANCZOS), np.float64), np.asarray(a.resize(size, Image.LANCZOS), np.float64) / 255
+
+def bucket_seat_image(S, q, i_sh, s_wrap, length, size=1024, seed=41):
     """left half: the front of the seat (U across, V from the front of the cushion to the top); right half: the back of the shell"""
     W = H = size; yy, xx = np.mgrid[0:H, 0:W].astype(np.float64)
     img = np.empty((H, W, 3)); img[:] = SEAT_RGB
@@ -1090,17 +1118,18 @@ def bucket_seat_image(S, q, i_sh, size=1024, seed=41):
     seams += [[(px(0.0), row(corner * 0.48)), (px(0.0), row(corner))]]
     over((120, 86, 96), 0.70 * mask(lambda d: [d.line(s_, fill=255, width=4) for s_ in seams], 1.2))
     over((236, 200, 206), 0.35 * mask(lambda d: [d.line([(a[0] + 5, a[1] + 5), (b_[0] + 5, b_[1] + 5)], fill=255, width=4) for a, b_ in seams], 2.0))
-    # the print on the headrest: a dark ring with a brushed band across it
-    cx, cy = px(0.0), row(0.925)
-    ring = mask(lambda d: (d.ellipse((cx - 50, cy - 46, cx + 50, cy + 46), outline=255, width=6), d.ellipse((cx - 36, cy - 33, cx + 36, cy + 33), outline=255, width=2)), 0.8)
-    band = mask(lambda d: [d.line([(cx - 62 + 9 * j, cy + 6 + (j % 3) * 4 - 16 * (j % 2)), (cx - 56 + 9 * j, cy + 20 - (j % 4) * 3)], fill=255, width=6) for j in range(14)], 0.7)
-    over((62, 30, 40), 0.80 * np.maximum(ring * 0.8, band))
+    # the print on the headrest (Reference Photos/seat and shifter)
+    sl = 0.925; wl = np.interp(sl, S, q[:, 2]); lc, la = seat_logo(0.46 * W / (2 * wl) / 1000, 0.98 * H / length / 1000)
+    cx, cy = int(px(0.0)), int(row(sl)); h_, w_ = la.shape; y0_, x0_ = cy - h_ // 2, cx - w_ // 2
+    reg = img[y0_:y0_ + h_, x0_:x0_ + w_]; aa = 0.88 * la[..., None]; reg[:] = reg * (1 - aa) + lc * aa
     # grime: grey where shoulders, head and hands rub; darker towards the edges of the shell
     dirt = np.exp(-(((xx - px(0.78)) / 60) ** 2 + ((yy - row(0.80)) / 90) ** 2)) + np.exp(-(((xx - px(-0.78)) / 60) ** 2 + ((yy - row(0.78)) / 80) ** 2))
     dirt += 0.7 * np.exp(-(((xx - px(0.45)) / 70) ** 2 + ((yy - row(0.93)) / 40) ** 2)) + 0.5 * np.exp(-(((xx - px(0.0)) / 150) ** 2 + ((yy - row(0.10)) / 50) ** 2))
     over((120, 112, 112), np.clip(0.55 * dirt * (0.5 + noise((H, W), 9, seed + 3)), 0, 0.75) * (xx < W // 2))
-    # back of the shell: black gel coat full of prismatic glitter
-    rng = np.random.default_rng(seed + 4); bk = img[:, W // 2:]; bh, bw = bk.shape[:2]
+    # back of the shell: black gel coat full of prismatic glitter, inside the panel the cover leaves open
+    rng = np.random.default_rng(seed + 4); bk = img[:, W // 2:]; bh, bw = bk.shape[:2]; cloth = bk.copy() * 0.93
+    ub_ = 1 - 2 * ((np.arange(bw) + W // 2 + 0.5) / W - 0.52) / 0.46; sb_ = ((np.arange(bh) + 0.5) / H - 0.01) / 0.98
+    shell = (np.abs(ub_)[None] < WRAP_U) & (sb_[:, None] < s_wrap)
     bk[:] = np.array([15, 15, 18.0]) * (0.85 + 0.3 * noise((bh, bw), 6, seed + 5))[..., None]
     n = int(0.10 * bh * bw); ys, xs = rng.integers(0, bh, n), rng.integers(0, bw, n); hue = rng.random(n)
     rgb = 0.5 + 0.5 * np.cos(2 * np.pi * (hue[:, None] + np.array([0, 1 / 3, 2 / 3]))); sat = rng.uniform(0.4, 0.9, n)[:, None]
@@ -1108,6 +1137,13 @@ def bucket_seat_image(S, q, i_sh, size=1024, seed=41):
     n = int(0.004 * bh * bw); ys, xs = rng.integers(0, bh - 1, n), rng.integers(0, bw - 1, n)
     for dy in (0, 1):
         for dx in (0, 1): bk[ys + dy, xs + dx] = 255 * rng.uniform(0.75, 1.0, n)[:, None] * np.array([1.0, 0.97, 1.0])
+    from scipy.ndimage import distance_transform_edt
+    edge = np.where(shell, distance_transform_edt(shell), distance_transform_edt(~shell))       # pixels from the cover's edge, either side
+    bk[:] = np.where(shell[..., None], bk, cloth)
+    bk *= (1 - 0.30 * np.exp(-(distance_transform_edt(shell) / 5.0) ** 2) * shell)[..., None]                   # a little shadow under the cover's edge
+    bk[edge < 2.5] = (52, 40, 44)                                                                               # the turned edge of the cover
+    st = (edge >= 3) & (edge < 5) & ~shell & ((np.arange(bw)[None] + np.arange(bh)[:, None]) // 5 % 2 == 0)
+    bk[st] = (150, 116, 124)                                                                                    # its stitching
     return Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), 'RGB')
 
 def harness_image(w=128, h=512):
@@ -1122,10 +1158,10 @@ def harness_image(w=128, h=512):
 def bucket_seat(k):
     gone = sum(drop_components(k, nm, lambda c: c[0] > 0.05 and c[2] >= -0.75) for nm in ('seatleather1', 'seatleather2'))
     S, q, t, nrm, length = seat_frame(141)
-    uf = np.linspace(-1, 1, 61); ub = np.linspace(1, -1, 61)
-    loop = [(u, False) for u in uf] + [(u, True) for u in ub] + [(-1.0, False)]
-    U = np.r_[0.02 + 0.46 * (uf + 1) / 2, 0.52 + 0.46 * (1 - ub) / 2, 1.02]
-    P = np.array([[seat_point(q, nrm, i, u, back=bk) for u, bk in loop] for i in range(len(S))])
+    uf = np.linspace(-1, 1, 61); ub = np.linspace(1, -1, 61); ph = np.linspace(0, np.pi, 9)[1:-1]            # front, rounded edge, back, rounded edge
+    loop = [(u, 0, 0) for u in uf] + [(1.0, 2, p) for p in ph] + [(u, 1, 0) for u in ub] + [(-1.0, 2, p) for p in ph[::-1]] + [(-1.0, 0, 0)]
+    U = np.r_[0.02 + 0.46 * (uf + 1) / 2, np.full(len(ph), 0.48), 0.52 + 0.46 * (1 - ub) / 2, np.full(len(ph), 1.02), 1.02]
+    P = np.array([[seat_edge_point(q, nrm, i, u, p) if sd == 2 else seat_point(q, nrm, i, u, back=sd == 1) for u, sd, p in loop] for i in range(len(S))])
     UV = np.stack([np.broadcast_to(U[None], P.shape[:2]), np.broadcast_to((0.01 + 0.98 * S)[:, None], P.shape[:2])], axis=-1)
     i_sh = int(np.argmin(np.abs(q[:, 1] - 0.80) + (q[:, 0] > -0.36))); i_lap = int(np.argmin(np.abs(q[:, 0] + 0.215) + (q[:, 1] > 0.36)))
     # harness slots cut right through the backrest (both faces), lined with a black rubber grommet
@@ -1140,8 +1176,8 @@ def bucket_seat(k):
             qa = np.abs(a - a0) - (SLOT_HALF[0] - SLOT_R); qb = np.abs(b - b0) - (SLOT_HALF[1] - SLOT_R)
             out = np.minimum(out, np.hypot(np.maximum(qa, 0), np.maximum(qb, 0)) + np.minimum(np.maximum(qa, qb), 0) - SLOT_R)
         return out
-    us = np.array([u for u, _ in loop]); bks = np.array([bk for _, bk in loop]); sc = (S[:-1] + S[1:]) / 2
-    uc = (us[:-1] + us[1:]) / 2; same = bks[:-1] == bks[1:]
+    us = np.array([u for u, _, _ in loop]); sds = np.array([sd for _, sd, _ in loop]); sc = (S[:-1] + S[1:]) / 2
+    uc = (us[:-1] + us[1:]) / 2; same = (sds[:-1] == sds[1:]) & (sds[:-1] != 2)
     cut = (sdf(uc[None] * width(sc)[:, None], sc[:, None] * length) < 0.002) & same[None]
     Vs_, Fs_ = surf(P, UV, 'out'); Fs_ = Fs_[~np.r_[cut.ravel(), cut.ravel()]]
     def rrect(hx, hy, r, n=8):
@@ -1161,8 +1197,10 @@ def bucket_seat(k):
     caps = Builder()
     for i, sgn in ((0, -1.0), (len(S) - 1, 1.0)):
         caps.poly(P[i, :-1], (0, sgn * t[i, 1], sgn * t[i, 0]), [(0.75, 0.01 + 0.98 * S[i])] * (P.shape[1] - 1))
-    k.set_texture('gh_bucket_seat.png', png_bytes(bucket_seat_image(S, q, i_sh)))
-    V, F = join((Vs_, Fs_), caps.done()); shell = V[F][:, :, 6].mean(1) > 0.5                                  # the back of the shell: glossy black glitter gel coat
+    top = (slots[0][1] + SLOT_HALF[1] + 0.065) / length; s_wrap = S[np.argmin(np.abs(S - top))]                # ... and over the top down to just above the slots
+    k.set_texture('gh_bucket_seat.png', png_bytes(bucket_seat_image(S, q, i_sh, s_wrap, length)))
+    V, F = join((Vs_, Fs_), caps.done()); uvc = V[F][:, :, 6:8].mean(1); ubc = 1 - 2 * (uvc[:, 0] - 0.52) / 0.46; scc = (uvc[:, 1] - 0.01) / 0.98
+    shell = (uvc[:, 0] > 0.5) & (uvc[:, 0] < 1.0) & (np.abs(ubc) < WRAP_U) & (scc < s_wrap)                    # the open back of the shell: glossy black glitter gel coat
     def part(mask):
         used = np.unique(F[mask]); re = np.full(len(V), -1); re[used] = np.arange(len(used)); return V[used], re[F[mask]]
     k.add_mesh('BUCKET_SEAT', *part(~shell), k.add_material(simple_material('gh_bucket_seat', 'gh_bucket_seat.png', 0.42, 0.50, 0.04, 6.0)))
