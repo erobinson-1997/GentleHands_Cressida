@@ -15,7 +15,7 @@ import config
 from kn5io import Kn5, Material, Node, world_pos, deform, split_mesh, update_bounds, unit, weld_normals
 
 STEPS = ['mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade', 'door_numbers', 'front_end', 'lower_panel', 'grille', 'clear_lamps', 'taillight_damage', 'trunk_face', 'pinstripe', 'paint_damage',
-         'rear_seat_delete', 'bucket_seat', 'shifter', 'floor_mat', 'head_unit', 'passenger_seat', 'interior_colors', 'bug_splatter', 'debris_layer', 'evo_wheels']
+         'rear_seat_delete', 'bucket_seat', 'shifter', 'floor_mat', 'head_unit', 'passenger_seat', 'interior_colors', 'bug_splatter', 'debris_layer']
 PLATE_TEXT = '8XKQ407'          # made-up number (not the real plate); set to None to keep the original mod's plate
 PLATE_MOSAIC = True             # pixelate the number like a censored photo
 FRONT_PLATE = True              # hangs below the front bumper
@@ -1605,73 +1605,6 @@ def bug_splatter(k):
     k.add_mesh('BUG_SPLATTER', V, fix_winding(V, F), k.add_material(m), transparent=1, shadows=0)
     return {'tris': len(F), 'bugs': n}
 
-# ------------------------------------------------------------------ 16c. Raceline 131B EVO (7 spokes, matte black, 16x7) - shown by the Mountain Silver skin only
-# Built into every wheel next to the AVS rim, in the rim's own frame (axle along x, outboard towards -x). Its texture gh_evo.png is clear in the
-# model, and the AVS material is alpha tested, so a skin picks the wheel by textures alone: the Mountain Silver skin fills in gh_evo.png and
-# clears MKII_Grey.png / MKIII_Grey.png.
-EVO_RIMS = (('SSR_MKIILF', 'LF'), ('SSR_MKII', 'RF'), ('SSR_MKIII', 'RR'), ('SSR_MKIIILR', 'LR'))
-EVO_HUB_SC, EVO_CAP_SC = 0.2 / 0.078, 0.2 / 0.031          # planar texture scale of the hub face and the centre cap (UV per metre)
-EVO_PCD = (0.05715, 0.0500)                                 # dual drilled: 5x114.3 (with the nuts) and 5x100
-
-def evo_image(S=512, seed=121):
-    img = np.zeros((S, S, 4)); img[..., 3] = 255; h = S // 2
-    img[..., :3] = np.array([28, 28, 30.0]) * (0.88 + 0.24 * noise((S, S), 2, seed))[..., None]                 # matte black powder coat
-    img[h:, h:, :3] = np.array([196, 198, 204.0]) * (0.75 + 0.35 * noise((h, h), 6, seed + 1))[..., None]      # chrome (nuts)
-    im = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), 'RGBA'); d = ImageDraw.Draw(im)
-    hx, hy, pm = 3 * S // 4, S // 4, EVO_HUB_SC * S                                                              # hub face: the ten lug holes
-    for j in range(5):
-        for R, ph, rr in ((EVO_PCD[0], 0.0, 0.0105), (EVO_PCD[1], np.pi / 5, 0.0075)):
-            a = 2 * np.pi * j / 5 + ph; x, y = hx - pm * R * np.cos(a), hy - pm * R * np.sin(a)
-            d.ellipse((x - pm * rr, y - pm * rr, x + pm * rr, y + pm * rr), fill=(7, 7, 8, 255))
-    cx, cy, pc = S // 4, 3 * S // 4, EVO_CAP_SC * S                                                             # centre cap: chrome ring, black centre, logo
-    d.ellipse((cx - pc * 0.031, cy - pc * 0.031, cx + pc * 0.031, cy + pc * 0.031), fill=(200, 202, 208, 255))
-    d.ellipse((cx - pc * 0.025, cy - pc * 0.025, cx + pc * 0.025, cy + pc * 0.025), fill=(16, 16, 18, 255))
-    d.text((cx, cy - 4), 'RACELINE', font=font(['arialbd.ttf'], 15), fill=(226, 226, 230, 255), anchor='mm')
-    d.text((cx, cy + 10), 'TUNING', font=font(['arial.ttf'], 9), fill=(200, 200, 204, 255), anchor='mm')
-    return im
-
-def evo_wheel():
-    """one wheel in rim-local coordinates"""
-    th = np.linspace(0, 2 * np.pi, 73)
-    def rev(prof, uvf, seg_th=th):
-        P = np.array([np.c_[np.full(len(seg_th), x), r * np.cos(seg_th), r * np.sin(seg_th)] for x, r in prof])
-        UV = np.array([uvf(x, r, seg_th) for x, r in prof]); return two_sided(*surf(P, UV, 'out'))
-    black = lambda x, r, t: np.c_[0.05 + 0.40 * t / (2 * np.pi), np.full(len(t), 0.20)]
-    hub = lambda x, r, t: np.c_[0.75 - r * np.cos(t) * EVO_HUB_SC, 0.25 - r * np.sin(t) * EVO_HUB_SC]
-    cap = lambda x, r, t: np.c_[0.25 - r * np.cos(t) * EVO_CAP_SC, 0.75 - r * np.sin(t) * EVO_CAP_SC]
-    parts = [rev([(0.119, 0.2136), (0.112, 0.2136), (0.106, 0.2000), (0.100, 0.1884), (-0.098, 0.1884), (-0.108, 0.1930), (-0.1165, 0.1990),
-                  (-0.1165, 0.2135), (-0.1105, 0.2135), (-0.1040, 0.2050)], black),                                        # barrel and stepped lip
-             rev([(-0.100, 0.031), (-0.100, 0.078)], hub),                                                                  # hub face
-             rev([(-0.100, 0.078), (-0.094, 0.081), (-0.019, 0.081), (-0.019, 0.030)], black),                              # hub, back to the mounting face
-             rev([(-0.1000, 0.0310), (-0.1050, 0.0310), (-0.1080, 0.0280), (-0.1095, 0.0200), (-0.1100, 0.0005)], cap)]       # centre cap
-    for j in range(5):                                                                                                      # lug nuts
-        a = 2 * np.pi * j / 5; c = np.array([0, EVO_PCD[0] * np.cos(a), EVO_PCD[0] * np.sin(a)]); t6 = np.linspace(0, 2 * np.pi, 7) + np.pi / 6
-        V, F = rev([(-0.0995, 0.0098), (-0.1105, 0.0098), (-0.1120, 0.0070), (-0.1135, 0.0005)], lambda x, r, t: np.c_[0.70 + 0.1 * t / 7, np.full(len(t), 0.70)], t6)
-        V[:, :3] += c; parts.append((V, F))
-    # seven spokes, tapered and chamfered, rising a little from the hub to the lip
-    rs = np.linspace(0.070, 0.192, 12); f = (rs - rs[0]) / (rs[-1] - rs[0])
-    xf = -0.104 - 0.010 * f; dep = 0.028 - 0.008 * f; wf = 0.030 + 0.012 * f; ch = 0.004
-    for kk in range(7):
-        a = 2 * np.pi * kk / 7; er = np.array([0, np.cos(a), np.sin(a)]); et = np.array([0, -np.sin(a), np.cos(a)]); ex = np.array([1.0, 0, 0])
-        P = []; C = []
-        for r, x0, dp, w in zip(rs, xf, dep, wf):
-            wb = 0.78 * w; sec = [(-w / 2 + ch, 0), (w / 2 - ch, 0), (w / 2, ch), (wb / 2, dp), (-wb / 2, dp), (-w / 2, ch), (-w / 2 + ch, 0)]
-            P.append([ex * (x0 + dd) + er * r + et * tt for tt, dd in sec]); C.append(ex * (x0 + dp / 2) + er * r)
-        P = np.array(P); C = np.array(C); UV = np.zeros(P.shape[:2] + (2,)); UV[..., 0] = 0.05 + 0.4 * np.linspace(0, 1, P.shape[1])[None]; UV[..., 1] = 0.05 + 0.4 * f[:, None]
-        parts.append(surf(P, UV, (P - C[:, None]).reshape(-1, 3)))
-    return join(*parts)
-
-def evo_wheels(k):
-    for nm in ('ssrmk2', 'ssrmk3'):                                                                         # the AVS rims: a skin can now hide them
-        m = k.materials[k.mat_id(nm)]; m.shader = 'ksPerPixelMultiMap_AT'; m.alpha_tested = 1; m.set('ksAlphaRef', 0.5)
-    k.set_texture('gh_evo.png', png_bytes(Image.new('RGBA', (8, 8), (28, 28, 30, 0))))
-    mm = simple_material('gh_evo', 'gh_evo.png', 0.34, 0.42, 0.30, 24.0, shader='ksPerPixelAT', alpha_ref=0.5); mm.alpha_tested = 1; mid = k.add_material(mm)
-    V, F = evo_wheel()
-    for nm, corner in EVO_RIMS:
-        n, parent, M = k.find(nm); e = Node(2, 'RACELINE_' + corner); e.V = V.astype(np.float32); e.F = F; e.mat = mid; e.flags = (1, 1, 0); update_bounds(e)
-        parent.children.append(e)
-    return {'tris_per_wheel': len(F)}
-
 # ------------------------------------------------------------------ 17. skins: stickers / no stickers / pine needles and sap
 # A skin can only swap textures, so everything a skin switches lives in a texture of its own:
 #   stickers       gh_sticker.png, gh_number_panel.png (alpha tested: a clear texture hides them)
@@ -1765,10 +1698,12 @@ def write_skins():
     import shutil, json
     base = SKINS / BASE_SKIN
     if not base.exists(): return {'skipped': 'no ' + str(base)}
+    wheel_black = flat_texture((15, 15, 16)); wheel_matte = flat_texture((30, 40, 6))        # Raceline-style matte black: little specular, broad highlight, next to no reflection
     clear = png_bytes(Image.new('RGBA', (8, 8), (0, 0, 0, 0))); pine, needles = debris_image()
     variants = {
         'clean_silver': ('Clean Silver', 1, {'gh_sticker.png': clear, 'gh_number_panel.png': clear}),
-        'mountain_silver': ('Mountain Silver', 2, {'gh_sticker.png': clear, 'gh_number_panel.png': clear, 'gh_debris.png': png_bytes(pine), 'gh_bugs.png': png_bytes(_bugs['img']), 'gh_evo.png': png_bytes(evo_image()), 'MKII_Grey.png': clear, 'MKIII_Grey.png': clear}),
+        'mountain_silver': ('Mountain Silver', 2, {'gh_sticker.png': clear, 'gh_number_panel.png': clear, 'gh_debris.png': png_bytes(pine), 'gh_bugs.png': png_bytes(_bugs['img']), 'MKII_Grey.png': wheel_black, 'MKIII_Grey.png': wheel_black,
+                                                     'SSR_MKII_Map.png': wheel_matte, 'SSR_MKIII_Map.png': wheel_matte}),
     }
     out = {'needle_bundles': needles}
     for name, (title, prio, tex) in variants.items():

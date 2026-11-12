@@ -65,9 +65,7 @@ Front-end grime (`bug_splatter`): dead bugs and a dusty road film on the forward
 
 - `clean_silver` (Clean Silver) - clear `gh_sticker.png` and `gh_number_panel.png` hide the window sticker and the door numbers.
 - `mountain_silver` (Mountain Silver) - no stickers either; `gh_debris.png` (pine needles, sap, grit) shows on `DEBRIS_LAYER`, a shell just above the
-  top of the car that is clear in the model itself; `gh_bugs.png` (bugs and road film on the front end); `gh_evo.png` shows the Raceline 131B EVO
-  wheels (`evo_wheels`: `RACELINE_LF/RF/RR/LR`, built next to each AVS rim and clear in the model) and clear `MKII_Grey.png` / `MKIII_Grey.png`
-  hide the AVS rims (their material is alpha tested: `ksPerPixelMultiMap_AT`).
+  top of the car that is clear in the model itself; `gh_bugs.png` (bugs and road film on the front end); flat wheel textures (`MKII_Grey.png`, `MKIII_Grey.png`, `SSR_*_Map.png`) make the AVS wheels matte black.
 
-A skin can only swap textures, so each extra wheel design is built into the model, clear by default, and switched on by its skin. `preview.jpg` / `livery.png` are copied from the base skin only when missing:
+A skin can only swap textures, so a different wheel design needs its own 3D model (and its own car folder, or CSP); skins only recolour the AVS wheels. `preview.jpg` / `livery.png` are copied from the base skin only when missing:
 regenerate the previews in Content Manager.
