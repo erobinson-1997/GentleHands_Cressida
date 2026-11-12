@@ -15,7 +15,7 @@ import config
 from kn5io import Kn5, Material, Node, world_pos, deform, split_mesh, update_bounds, unit, weld_normals
 
 STEPS = ['mud_flaps', 'bar_rusty', 'plate', 'quarter_crease', 'mirror_primer', 'window_sticker', 'hood_fade', 'door_numbers', 'front_end', 'lower_panel', 'grille', 'clear_lamps', 'taillight_damage', 'trunk_face', 'pinstripe', 'paint_damage',
-         'rear_seat_delete', 'bucket_seat', 'shifter', 'floor_mat', 'head_unit', 'passenger_seat', 'interior_colors', 'bug_splatter', 'debris_layer', 'side_trim']
+         'rear_seat_delete', 'bucket_seat', 'shifter', 'floor_mat', 'head_unit', 'passenger_seat', 'interior_colors', 'bug_splatter', 'debris_layer', 'side_trim', 'bumper_end']
 PLATE_TEXT = '8XKQ407'          # made-up number (not the real plate); set to None to keep the original mod's plate
 PLATE_MOSAIC = True             # pixelate the number like a censored photo
 FRONT_PLATE = True              # hangs below the front bumper
@@ -570,6 +570,44 @@ def side_trim(k):
         nw = unit(V[:, 3:6].astype(np.float64) @ M[:3, :3])                     # world normals: up -> v 0, out -> 0.5
         V[:, 6] = 0.5; V[:, 7] = np.clip(0.5 - 0.62 * nw[:, 1], 0.01, 0.99)
         t.mat = mid; update_bounds(t); info[n.name] = len(t.F)
+    return info
+
+def bumper_end(k):
+    """rear bumper ends: plain paint below the moulding line (the paint texture still draws the old bumper's black rub strip
+    there) and a closed end on the side moulding where it meets the bumper end, as in the reference photo"""
+    tex = [x for x in k.textures if x[1] == 'carpaint_diffuse.dds'][0][2]
+    im = np.asarray(Image.open(io.BytesIO(tex)).convert('RGB')).astype(float); h, wd = im.shape[:2]
+    def colour(uv): return im[(np.mod(uv[:, 1], 1) * (h - 1)).astype(int), (np.mod(uv[:, 0], 1) * (wd - 1)).astype(int)].mean(1)
+    n, _, M = k.find('rest_of_body'); w = world_pos(n, M); c = w[n.F].mean(1); uv = n.V[n.F][:, :, 6:8].mean(1)
+    good = (np.abs(c[:, 0]) > 0.7) & (c[:, 2] < -2.2) & (c[:, 1] > 0.45) & (c[:, 1] < 0.47)
+    lum = colour(uv[good]); ref = np.median(lum); clean = uv[good][np.argmin(np.abs(lum - ref))]
+    info = {}
+    for name, zmax in (('rest_of_body', -2.19), ('rest_of_body_SUB1', -2.19), ('rest_of_body_SUB2', -2.19), ('r_fenders', -2.205)):
+        n, parent, M = k.find(name); w = world_pos(n, M); c = w[n.F].mean(1); uv = n.V[n.F][:, :, 6:8].mean(1)
+        bad = (np.abs(c[:, 0]) > 0.7) & (c[:, 2] < zmax) & (c[:, 1] > 0.355) & (c[:, 1] < 0.452) & (colour(uv) < 0.8 * ref)
+        if not bad.any(): continue
+        V, F = split_mesh(n, bad); V[:, 6:8] = clean
+        m = Node(2, name + '_paint'); m.V = V; m.F = F; m.mat = n.mat; m.flags = n.flags; update_bounds(m); parent.children.append(m)
+        info[name] = int(bad.sum())
+    # close the moulding (black strip + accent cap) where it stops at the bumper end
+    caps = []
+    for name in ('Object056', 'body_part003'):
+        n, parent, M = k.find(name); w = world_pos(n, M)
+        e = np.sort(np.vstack([n.F[:, [0, 1]], n.F[:, [1, 2]], n.F[:, [2, 0]]]), 1); u, cnt = np.unique(e, axis=0, return_counts=True)
+        for side in (1, -1):
+            zend = w[side * w[:, 0] > 0.5, 2].min()
+            ring = np.unique(u[cnt == 1]); ring = ring[(side * w[ring, 0] > 0.5) & (w[ring, 2] < zend + 0.012)]
+            if len(ring) < 3: continue
+            q = w[ring]; ctr = q.mean(0); ang = np.arctan2(q[:, 1] - ctr[1], side * (q[:, 0] - ctr[0])); q = q[np.argsort(ang)]
+            caps.append((q, ctr, n.mat))
+    for q, ctr, mat in caps:
+        nrm = np.array([0, 0, -1.0]); V = []; F = []
+        for i in range(len(q)):
+            a_, b_ = q[i], q[(i + 1) % len(q)]; base = len(V)
+            for p_ in (ctr, a_, b_): V.append([*p_, *nrm, 0.5, 0.5, 1, 0, 0])
+            F.append([base, base + 1, base + 2])
+        V = np.array(V, np.float32); F = fix_winding(V, F)
+        k.add_mesh('MOULDING_END', V, F, mat); info['caps'] = info.get('caps', 0) + 1
     return info
 
 def grille(k):

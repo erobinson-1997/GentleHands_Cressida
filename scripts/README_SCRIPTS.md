@@ -63,6 +63,10 @@ Side mouldings (`side_trim`): the chrome cap on top of the black side moulding (
 black with a thin white accent line, as on the real car. Material `gh_trim_accent` (a copy of `black` with `gh_trim_accent.png`);
 the line sits where the cap faces outward (texture v comes from the world normal's height).
 
+Rear bumper ends (`bumper_end`): the paint texture still draws the old bumper's black rub strip on the bumper ends, so those
+triangles (`rest_of_body`, `rest_of_body_SUB1`, the corner of `r_fenders`) are split off as `*_paint` with their UVs on a clean
+paint texel; the side moulding gets closed ends (`MOULDING_END`) where it stops at the bumper end.
+
 ### Skins
 
 `build_video_details.py` also writes two skins next to `skins/event_silver` (Event Silver, the base skin: stickers, silver AVS Model 5 wheels):
