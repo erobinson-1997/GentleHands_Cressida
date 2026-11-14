@@ -16,3 +16,11 @@ This is a car mod for Assetto Corsa based on my 1989 Toyota Cressida.
 <img width="1586" height="893" alt="Screenshot 2026-11-11 193241" src="https://github.com/user-attachments/assets/8f0cd29a-be23-48fd-9de9-fb379f16d830" />
 <img width="1586" height="893" alt="Screenshot 2026-11-11 193236" src="https://github.com/user-attachments/assets/4b68bcdb-3555-436c-a472-b037a7bb8f33" />
 <img width="1586" height="893" alt="Screenshot 2026-11-11 193246" src="https://github.com/user-attachments/assets/0253f507-f970-4bf9-bab8-1d8b8cff9e25" />
+
+## Credits
+The 3D model, sounds and original textures are by **GanGaHcr**. Please support them. [Link to original upload](https://vosan.co/car_packs/toyota-cressida-mx83)
+
+### Wheels
+"Advan AVS 5" (https://skfb.ly/oE7Rn) by gunis.david is licensed under Creative Commons Attribution 4.0 (http://creativecommons.org/licenses/by/4.0/). 
+#### Changes made: 
+The wheel geometry was converted from FBX to the Assetto Corsa KN5 format, scaled and re-proportioned to fit this car's tires (non-uniform axial scale, outer dome flattened toward the lip plane), re-oriented, given rebuilt smooth normals, and mapped to the car's wheel materials. The barrel, spokes and hub come from the original model. The lug nuts and center cap were added.
